@@ -1,0 +1,46 @@
+:root {
+  /* Color Palette matching HomeTech Solutions Master Prototype */
+  --primary-navy: #170f41;
+  --secondary-navy: #101831;
+  --navy-hover: #0c234b;
+  --accent-yellow: #dddb71;
+  --accent-yellow-hover: #d1d365;
+  --accent-yellow-light: #fff8e1;
+  --bg-color: #F5F7FB;
+  --white: #FFFFFF;
+  --primary-text: #172033;
+  --secondary-text: #667085;
+  --muted-text: #8b95a5;
+  --border-color: #E2E8F0;
+  --border-light: #EEF2F6;
+  --card-bg: #FFFFFF;
+
+  /* Status Colors */
+  --success: #198754;
+  --success-bg: #e8f5e9;
+  --danger: #DC3545;
+  --danger-bg: #fde8e8;
+  --warning: #F59E0B;
+  --warning-bg: #fef3c7;
+  --info: #0284C7;
+  --info-bg: #e0f2fe;
+
+  /* Typography */
+  --font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-heading: 'Plus Jakarta Sans', system-ui, sans-serif;
+
+  /* Shadows & Radius */
+  --shadow-sm: 0 1px 3px rgba(7, 29, 73, 0.05);
+  --shadow-md: 0 4px 12px rgba(7, 29, 73, 0.08);
+  --shadow-lg: 0 10px 25px rgba(7, 29, 73, 0.12);
+  --shadow-hover: 0 12px 28px rgba(7, 29, 73, 0.16);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-full: 9999px;
+
+  /* Layout dimensions */
+  --navbar-height: 72px;
+  --sidebar-width: 260px;
+  --container-max: 1200px;
+}
