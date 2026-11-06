@@ -80,6 +80,10 @@ export default function LiveMap({
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
       }
+      workerMarkerRef.current = null;
+      customerMarkerRef.current = null;
+      polylineRef.current = null;
+      multiMarkersRef.current = [];
     };
   }, []);
 
@@ -99,7 +103,10 @@ export default function LiveMap({
         ? new Date(workerLocation.lastUpdated).toLocaleTimeString()
         : 'Just now';
 
-      if (!workerMarkerRef.current) {
+      if (!workerMarkerRef.current || !map.hasLayer(workerMarkerRef.current)) {
+        if (workerMarkerRef.current) {
+          try { workerMarkerRef.current.remove(); } catch(e) {}
+        }
         workerMarkerRef.current = L.marker(wPos, { icon: workerIcon })
           .addTo(map)
           .bindPopup(
@@ -141,7 +148,10 @@ export default function LiveMap({
         cPos = [wLat + 0.005, wLng + 0.005];
       }
 
-      if (!customerMarkerRef.current) {
+      if (!customerMarkerRef.current || !map.hasLayer(customerMarkerRef.current)) {
+        if (customerMarkerRef.current) {
+          try { customerMarkerRef.current.remove(); } catch(e) {}
+        }
         customerMarkerRef.current = L.marker(cPos, { icon: customerIcon })
           .addTo(map)
           .bindPopup(
@@ -155,7 +165,10 @@ export default function LiveMap({
       }
 
       // Draw route path line between worker and destination
-      if (!polylineRef.current) {
+      if (!polylineRef.current || !map.hasLayer(polylineRef.current)) {
+        if (polylineRef.current) {
+          try { polylineRef.current.remove(); } catch(e) {}
+        }
         polylineRef.current = L.polyline([wPos, cPos], {
           color: '#071D49',
           weight: 4,

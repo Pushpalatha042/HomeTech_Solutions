@@ -2,59 +2,113 @@ import Complaint from '../models/Complaint.js';
 import Booking from '../models/Booking.js';
 import User from '../models/User.js';
 
+export const WORKER_BOOKING_COMPLAINT_CATEGORIES = [
+  'Customer Misconduct',
+  'Unsafe Workplace',
+  'Payment Dispute',
+  'Incorrect Service Information',
+  'Unreasonable Additional Work',
+  'Customer Not Available',
+  'Incorrect Address',
+  'Customer Providing Incorrect Address',
+  'Access or Location Issue',
+  'Poor Communication',
+  'Other'
+];
+
 // Internal helper for complaint creation
 async function handleComplaintCreation(req, res, forcedType = null) {
   try {
     const { bookingId, category, description, attachments = [] } = req.body;
     const userId = req.user._id;
 
-    if (!bookingId || !category || !description) {
-      return res.status(400).json({ message: 'Booking ID, category, and description are required.' });
+    if (!category || !category.trim()) {
+      return res.status(400).json({ message: 'Complaint category is required.' });
     }
-
-    // Lookup booking by _id or bookingId
-    let query = { _id: bookingId };
-    if (typeof bookingId === 'string' && !bookingId.match(/^[0-9a-fA-F]{24}$/)) {
-      query = { bookingId };
-    }
-
-    const booking = await Booking.findOne(query)
-      .populate('customerId', 'name email phone')
-      .populate('workerId', 'name email phone');
-
-    if (!booking) {
-      return res.status(404).json({ message: 'Associated booking not found.' });
-    }
-
-    const isCustomer = booking.customerId?._id?.toString() === userId.toString();
-    const isWorker = booking.workerId?._id?.toString() === userId.toString();
-
-    if (!isCustomer && !isWorker) {
-      return res.status(403).json({ message: 'You are neither the customer nor the assigned worker for this booking.' });
+    if (!description || !description.trim()) {
+      return res.status(400).json({ message: 'Complaint description is required.' });
     }
 
     let complaintType = forcedType;
     if (!complaintType) {
-      complaintType = isCustomer ? 'customer' : 'worker';
+      if (req.user.roles?.includes('worker') && !bookingId) {
+        complaintType = 'worker';
+      } else {
+        complaintType = 'customer';
+      }
     }
 
-    if (complaintType === 'customer' && !isCustomer) {
-      return res.status(403).json({ message: 'Only the customer can submit a customer complaint for this booking.' });
-    }
-    if (complaintType === 'worker' && !isWorker) {
-      return res.status(403).json({ message: 'Only the assigned worker can submit a workplace complaint for this booking.' });
+    // Worker complaints MUST be linked to an explicit booking
+    if (complaintType === 'worker') {
+      if (!bookingId || String(bookingId).trim() === '') {
+        return res.status(400).json({ message: 'Booking ID is required for worker complaints.' });
+      }
+
+      if (!WORKER_BOOKING_COMPLAINT_CATEGORIES.includes(category.trim())) {
+        return res.status(400).json({
+          message: `Invalid complaint category. Must be one of: ${WORKER_BOOKING_COMPLAINT_CATEGORIES.join(', ')}`
+        });
+      }
     }
 
-    const complaintId = `CMP-${Date.now().toString().slice(-6)}${Math.floor(10 + Math.random() * 90)}`;
+    let resolvedBooking = null;
+    let customerId = null;
+    let workerId = null;
+
+    if (bookingId && String(bookingId).trim() !== '') {
+      let query = { _id: bookingId };
+      if (typeof bookingId === 'string' && !bookingId.match(/^[0-9a-fA-F]{24}$/)) {
+        query = { bookingId };
+      }
+
+      resolvedBooking = await Booking.findOne(query)
+        .populate('customerId', 'name email phone')
+        .populate('workerId', 'name email phone');
+
+      if (!resolvedBooking) {
+        return res.status(404).json({ message: 'Associated booking not found.' });
+      }
+
+      customerId = resolvedBooking.customerId?._id || resolvedBooking.customerId;
+      workerId = resolvedBooking.workerId?._id || resolvedBooking.workerId;
+
+      if (!complaintType) {
+        const isCustomer = customerId?.toString() === userId.toString();
+        complaintType = isCustomer ? 'customer' : 'worker';
+      }
+
+      const isCustomer = customerId?.toString() === userId.toString();
+      const isAssignedWorker = workerId?.toString() === userId.toString();
+
+      if (complaintType === 'customer' && !isCustomer) {
+        return res.status(403).json({ message: 'Only the customer can submit a customer complaint for this booking.' });
+      }
+
+      // STRICT PERMISSION CHECK: Only the specifically assigned worker can submit a complaint for this booking
+      if (complaintType === 'worker' && !isAssignedWorker) {
+        return res.status(403).json({
+          message: 'Forbidden. You can only submit complaints for bookings assigned to you.'
+        });
+      }
+    } else {
+      // No bookingId provided
+      if (complaintType === 'customer') {
+        return res.status(400).json({ message: 'Booking ID is required for customer complaints.' });
+      }
+      workerId = userId;
+    }
+
+    const prefix = complaintType === 'worker' ? 'CMP-WKR' : 'CMP';
+    const complaintId = `${prefix}-${Date.now().toString().slice(-6)}${Math.floor(10 + Math.random() * 90)}`;
 
     const complaint = await Complaint.create({
       complaintId,
-      bookingId: booking._id,
+      bookingId: resolvedBooking?._id || null,
       submittedBy: userId,
-      customerId: booking.customerId?._id,
-      workerId: booking.workerId?._id,
+      customerId: customerId || null,
+      workerId: workerId || userId,
       complaintType,
-      category,
+      category: category.trim(),
       description: description.trim(),
       attachments: Array.isArray(attachments) ? attachments : [attachments].filter(Boolean),
       status: 'Submitted'
@@ -74,7 +128,7 @@ async function handleComplaintCreation(req, res, forcedType = null) {
 
     res.status(201).json({
       success: true,
-      message: 'Complaint submitted successfully and forwarded to administrator for review.',
+      message: `Complaint submitted successfully with reference ID ${complaint.complaintId}.`,
       complaint: populatedComplaint
     });
   } catch (err) {
@@ -122,6 +176,29 @@ export async function getMyComplaints(req, res) {
   }
 }
 
+// 2b. Worker's Own Complaints (GET /api/complaints/worker/my)
+export async function getWorkerComplaints(req, res) {
+  try {
+    const userId = req.user._id;
+    const complaints = await Complaint.find({
+      $or: [
+        { submittedBy: userId, complaintType: 'worker' },
+        { workerId: userId, complaintType: 'worker' }
+      ]
+    })
+      .populate('customerId', 'name phone email profileImage')
+      .populate('workerId', 'name phone email profileImage')
+      .populate('submittedBy', 'name phone email')
+      .populate('bookingId', 'bookingId category status totalAmount address')
+      .sort({ createdAt: -1 });
+
+    res.json(complaints);
+  } catch (err) {
+    console.error('getWorkerComplaints error:', err);
+    res.status(500).json({ message: 'Failed to fetch worker complaints.' });
+  }
+}
+
 // 3. Get Complaints for a Specific Booking
 export async function getBookingComplaints(req, res) {
   try {
@@ -130,6 +207,19 @@ export async function getBookingComplaints(req, res) {
     if (!bookingId.match(/^[0-9a-fA-F]{24}$/)) {
       const b = await Booking.findOne({ bookingId }).select('_id');
       if (b) query = { bookingId: b._id };
+    }
+
+    const userId = req.user._id;
+    const isAdmin = req.user.roles?.includes('admin');
+    const isWorker = req.user.roles?.includes('worker');
+
+    if (!isAdmin) {
+      if (isWorker) {
+        query.submittedBy = userId;
+      } else {
+        query.complaintType = 'customer';
+        query.customerId = userId;
+      }
     }
 
     const complaints = await Complaint.find(query)
@@ -147,7 +237,7 @@ export async function getBookingComplaints(req, res) {
 // 4. Admin: Get All Complaints with Filtering (GET /api/admin/complaints & GET /api/complaints/admin)
 export async function getAdminComplaints(req, res) {
   try {
-    const { type, status } = req.query;
+    const { type, status, category, search } = req.query;
     const filter = {};
 
     if (type && ['customer', 'worker'].includes(type)) {
@@ -155,6 +245,9 @@ export async function getAdminComplaints(req, res) {
     }
     if (status && status !== 'all') {
       filter.status = status;
+    }
+    if (category && category !== 'all') {
+      filter.category = category;
     }
 
     const complaints = await Complaint.find(filter)
@@ -164,7 +257,21 @@ export async function getAdminComplaints(req, res) {
       .populate('bookingId', 'bookingId category status totalAmount address bookingDate bookingTime')
       .sort({ createdAt: -1 });
 
-    res.json(complaints);
+    let result = complaints;
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = complaints.filter((c) =>
+        (c.complaintId && c.complaintId.toLowerCase().includes(q)) ||
+        (c.category && c.category.toLowerCase().includes(q)) ||
+        (c.description && c.description.toLowerCase().includes(q)) ||
+        (c.workerId?.name && c.workerId.name.toLowerCase().includes(q)) ||
+        (c.customerId?.name && c.customerId.name.toLowerCase().includes(q)) ||
+        (c.submittedBy?.name && c.submittedBy.name.toLowerCase().includes(q)) ||
+        (c.bookingId?.bookingId && c.bookingId.bookingId.toLowerCase().includes(q))
+      );
+    }
+
+    res.json(result);
   } catch (err) {
     console.error('getAdminComplaints error:', err);
     res.status(500).json({ message: 'Failed to fetch admin complaints.' });

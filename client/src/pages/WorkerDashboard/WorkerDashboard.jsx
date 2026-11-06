@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   CalendarDays,
   CheckCircle2,
@@ -19,31 +19,68 @@ import {
   Send,
   Navigation,
   ShieldAlert,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Plus,
+  PlusCircle,
+  Layers,
+  FileText
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useSocket } from '../../context/SocketContext';
 import DashboardSidebar from '../../components/sidebar/DashboardSidebar';
 import StatCard from '../../components/common/StatCard';
 import Modal from '../../components/common/Modal';
+import ServiceHistory from './ServiceHistory';
+import WorkerComplaints from './WorkerComplaints';
+import WorkerApplications from './WorkerApplications';
 import api from '../../api';
+import { getServiceImage, homeMaintenanceImg } from '../../assets/images';
 
-const WORKER_PROBLEM_CATEGORIES = [
+const WORKER_COMPLAINT_CATEGORIES = [
   'Customer Misconduct',
-  'Unsafe Working Environment',
-  'Incorrect Service Information',
+  'Unsafe Workplace',
   'Payment Dispute',
-  'Additional Work Requested',
+  'Incorrect Service Information',
+  'Unreasonable Additional Work',
+  'Customer Not Available',
+  'Incorrect Address',
+  'Customer Providing Incorrect Address',
   'Access or Location Issue',
+  'Poor Communication',
   'Other'
 ];
 
-export default function WorkerDashboard() {
+const DEFAULT_SERVICE_CATEGORIES = [
+  'Plumbing',
+  'Electrical',
+  'Cleaning',
+  'Carpentry',
+  'Painting',
+  'Appliance Repair',
+  'AC Repair',
+  'Pest Control',
+  'Home Maintenance'
+];
+
+export default function WorkerDashboard({ initialTab }) {
   const { user, notify, switchRole } = useAuth();
   const socket = useSocket();
   const navigate = useNavigate();
+  const location = useLocation();
 
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const queryTab = new URLSearchParams(location.search).get('tab');
+  const [activeTab, setActiveTab] = useState(initialTab || queryTab || 'dashboard');
+
+  useEffect(() => {
+    const qTab = new URLSearchParams(location.search).get('tab');
+    if (initialTab) {
+      setActiveTab(initialTab);
+    } else if (qTab) {
+      setActiveTab(qTab);
+    } else {
+      setActiveTab('dashboard');
+    }
+  }, [location.search, initialTab]);
   const [profileData, setProfileData] = useState(null);
   const [jobsData, setJobsData] = useState({
     availableRequests: [],
@@ -60,14 +97,38 @@ export default function WorkerDashboard() {
   const watchIdRef = useRef(null);
   const lastSentRef = useRef({ time: 0, lat: null, lng: null });
 
-  // Problem Report Modal State (Requirement 7)
-  const [reportModalJob, setReportModalJob] = useState(null);
-  const [reportForm, setReportForm] = useState({
-    category: WORKER_PROBLEM_CATEGORIES[0],
+  // Arrival OTP Verification State
+  const [arrivalOtpModalJob, setArrivalOtpModalJob] = useState(null);
+  const [arrivalOtpInput, setArrivalOtpInput] = useState('');
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
+  const [otpError, setOtpError] = useState('');
+
+  // Worker Complaints State (Booking-Specific Complaint Modal)
+  const [complaintsList, setComplaintsList] = useState([]);
+  const [loadingComplaints, setLoadingComplaints] = useState(false);
+  const [bookingComplaintJob, setBookingComplaintJob] = useState(null);
+  const [complaintForm, setComplaintForm] = useState({
+    category: WORKER_COMPLAINT_CATEGORIES[0],
     description: '',
     attachment: ''
   });
-  const [submittingReport, setSubmittingReport] = useState(false);
+  const [submittingComplaint, setSubmittingComplaint] = useState(false);
+  const [complaintError, setComplaintError] = useState('');
+
+  // Additional Categories Application State (Feature 2)
+  const [additionalApplications, setAdditionalApplications] = useState([]);
+  const [loadingApplications, setLoadingApplications] = useState(false);
+  const [allCategoriesList, setAllCategoriesList] = useState(DEFAULT_SERVICE_CATEGORIES);
+  const [isApplyModalOpen, setIsApplyModalOpen] = useState(false);
+  const [applyForm, setApplyForm] = useState({
+    requestedCategories: [],
+    experience: 1,
+    skills: '',
+    professionalDescription: '',
+    documents: []
+  });
+  const [submittingApply, setSubmittingApply] = useState(false);
+  const [applyError, setApplyError] = useState('');
 
   const fetchWorkerData = async () => {
     setLoading(true);
@@ -129,9 +190,153 @@ export default function WorkerDashboard() {
     }
   };
 
+  const fetchWorkerComplaints = async () => {
+    setLoadingComplaints(true);
+    try {
+      let res;
+      try {
+        res = await api.get('/complaints/worker/my');
+      } catch (e) {
+        res = await api.get('/complaints/my');
+      }
+      setComplaintsList(res.data || []);
+    } catch (err) {
+      console.error('fetchWorkerComplaints error:', err);
+    } finally {
+      setLoadingComplaints(false);
+    }
+  };
+
+  const fetchAdditionalApplications = async () => {
+    setLoadingApplications(true);
+    try {
+      const res = await api.get('/workers/additional-categories/my');
+      setAdditionalApplications(res.data || []);
+    } catch (err) {
+      console.error('fetchAdditionalApplications error:', err);
+    } finally {
+      setLoadingApplications(false);
+    }
+  };
+
+  const fetchCategories = async () => {
+    try {
+      const res = await api.get('/categories');
+      if (Array.isArray(res.data) && res.data.length > 0) {
+        setAllCategoriesList(res.data.map((c) => (typeof c === 'object' ? c.name : c)));
+      }
+    } catch (err) {
+      console.error('fetchCategories error:', err);
+    }
+  };
+
   useEffect(() => {
     fetchWorkerData();
+    fetchWorkerComplaints();
+    fetchAdditionalApplications();
+    fetchCategories();
   }, []);
+
+  const handleOpenBookingComplaint = (job) => {
+    setBookingComplaintJob(job);
+    setComplaintError('');
+    setComplaintForm({
+      category: WORKER_COMPLAINT_CATEGORIES[0],
+      description: '',
+      attachment: ''
+    });
+  };
+
+  const handleSubmitBookingComplaint = async (e) => {
+    e.preventDefault();
+    if (!bookingComplaintJob) return;
+    setComplaintError('');
+
+    if (!complaintForm.category || !complaintForm.category.trim()) {
+      setComplaintError('Complaint category is required.');
+      return;
+    }
+    if (!complaintForm.description || !complaintForm.description.trim()) {
+      setComplaintError('Complaint description is required.');
+      return;
+    }
+
+    setSubmittingComplaint(true);
+    try {
+      const payload = {
+        bookingId: bookingComplaintJob._id,
+        category: complaintForm.category.trim(),
+        description: complaintForm.description.trim(),
+        attachments: complaintForm.attachment ? [complaintForm.attachment.trim()] : []
+      };
+
+      const { data } = await api.post('/complaints/worker', payload);
+      notify(data.message || 'Complaint submitted successfully!', 'success');
+      setBookingComplaintJob(null);
+      setComplaintForm({
+        category: WORKER_COMPLAINT_CATEGORIES[0],
+        description: '',
+        attachment: ''
+      });
+      fetchWorkerComplaints();
+      fetchWorkerData();
+    } catch (err) {
+      const errMsg = err.response?.data?.message || 'Failed to submit complaint. Please try again.';
+      setComplaintError(errMsg);
+      notify(errMsg, 'danger');
+    } finally {
+      setSubmittingComplaint(false);
+    }
+  };
+
+  const handleToggleCategorySelect = (categoryName) => {
+    setApplyForm((prev) => {
+      const current = prev.requestedCategories || [];
+      const updated = current.includes(categoryName)
+        ? current.filter((c) => c !== categoryName)
+        : [...current, categoryName];
+      return { ...prev, requestedCategories: updated };
+    });
+  };
+
+  const handleSubmitApplyServices = async (e) => {
+    e.preventDefault();
+    setApplyError('');
+    if (!applyForm.requestedCategories || applyForm.requestedCategories.length === 0) {
+      setApplyError('Please select at least one additional category to apply for.');
+      return;
+    }
+
+    setSubmittingApply(true);
+    try {
+      const payload = {
+        requestedCategories: applyForm.requestedCategories,
+        experience: Number(applyForm.experience) || 1,
+        skills: applyForm.skills,
+        professionalDescription: (applyForm.professionalDescription || '').trim()
+      };
+
+      const { data } = await api.post('/workers/additional-categories', payload);
+      notify(data.message || 'Application submitted successfully for admin review!', 'success');
+      setIsApplyModalOpen(false);
+      setApplyForm({
+        requestedCategories: [],
+        experience: 1,
+        skills: '',
+        professionalDescription: '',
+        documents: []
+      });
+      fetchAdditionalApplications();
+      setActiveTab('applications');
+      navigate('/worker/dashboard?tab=applications');
+    } catch (err) {
+      const errMsg = err.response?.data?.message || 'Failed to submit application. Please try again.';
+      setApplyError(errMsg);
+      notify(errMsg, 'danger');
+    } finally {
+      setSubmittingApply(false);
+    }
+  };
 
   // Join worker-specific Socket.IO room (Requirement 7)
   useEffect(() => {
@@ -190,7 +395,7 @@ export default function WorkerDashboard() {
   // Whenever worker has an active job (Accepted or In Progress), start continuous tracking automatically
   useEffect(() => {
     const activeJobs = jobsData.assignedJobs.filter((j) =>
-      ['Accepted', 'In Progress'].includes(j.status)
+      ['Accepted', 'accepted', 'In Progress', 'in-progress', 'in_progress'].includes(j.status)
     );
 
     if (activeJobs.length === 0) {
@@ -344,14 +549,45 @@ export default function WorkerDashboard() {
     }
   };
 
-  // Start Job (Requirement 3: Changes status from Accepted to In Progress)
-  const handleStartJob = async (jobId) => {
+  // Start Job with Arrival OTP Verification
+  const handleStartJob = async (job) => {
     try {
-      const { data } = await api.put(`/workers/jobs/${jobId}/status`, { status: 'In Progress' });
-      notify(data.message, 'success');
+      const jobId = job._id || job.bookingMongoId;
+      if (job.status === 'Accepted') {
+        const { data } = await api.post(`/bookings/${jobId}/start-verification`);
+        notify(data.message || 'Arrival verification initiated. Ask customer for 6-digit code.', 'info');
+      }
+      setArrivalOtpModalJob(job);
+      setArrivalOtpInput('');
+      setOtpError('');
       fetchWorkerData();
     } catch (err) {
-      notify(err.response?.data?.message || 'Failed to start job.', 'danger');
+      notify(err.response?.data?.message || 'Failed to start arrival verification.', 'danger');
+    }
+  };
+
+  const handleVerifyArrivalOtp = async (e) => {
+    e.preventDefault();
+    if (!arrivalOtpModalJob) return;
+    if (!arrivalOtpInput.trim()) {
+      setOtpError('Please enter the 6-digit verification code.');
+      return;
+    }
+    setVerifyingOtp(true);
+    setOtpError('');
+    try {
+      const jobId = arrivalOtpModalJob._id || arrivalOtpModalJob.bookingMongoId;
+      const { data } = await api.post(`/bookings/${jobId}/verify-arrival-otp`, {
+        otp: arrivalOtpInput.trim()
+      });
+      notify(data.message || 'Arrival verified! Job is now In Progress.', 'success');
+      setArrivalOtpModalJob(null);
+      setArrivalOtpInput('');
+      fetchWorkerData();
+    } catch (err) {
+      setOtpError(err.response?.data?.message || 'Verification failed. Please check the OTP.');
+    } finally {
+      setVerifyingOtp(false);
     }
   };
 
@@ -367,44 +603,20 @@ export default function WorkerDashboard() {
     }
   };
 
-  // Worker Complaint Submission (Requirement 7)
-  const handleOpenReportModal = (job) => {
-    setReportModalJob(job);
-    setReportForm({
-      category: WORKER_PROBLEM_CATEGORIES[0],
-      description: '',
-      attachment: ''
-    });
-  };
-
-  const handleSubmitProblem = async (e) => {
-    e.preventDefault();
-    if (!reportForm.description.trim()) {
-      notify('Please describe the issue you encountered.', 'danger');
-      return;
-    }
-
-    setSubmittingReport(true);
-    try {
-      const { data } = await api.post('/complaints/worker', {
-        bookingId: reportModalJob._id,
-        category: reportForm.category,
-        description: reportForm.description.trim(),
-        attachments: reportForm.attachment ? [reportForm.attachment.trim()] : []
-      });
-      notify(data.message, 'success');
-      setReportModalJob(null);
-    } catch (err) {
-      notify(err.response?.data?.message || 'Failed to submit problem report.', 'danger');
-    } finally {
-      setSubmittingReport(false);
-    }
-  };
-
   return (
     <div className="dashboard-layout">
       {/* Sidebar */}
-      <DashboardSidebar activeTab={activeTab} onSelectTab={setActiveTab} />
+      <DashboardSidebar
+        activeTab={activeTab}
+        onSelectTab={(tab) => {
+          setActiveTab(tab);
+          if (tab === 'history') {
+            navigate('/worker/dashboard?tab=history');
+          } else {
+            navigate('/worker/dashboard');
+          }
+        }}
+      />
 
       {/* Main Dashboard Content */}
       <main className="dashboard-main">
@@ -474,8 +686,46 @@ export default function WorkerDashboard() {
           </div>
         )}
 
-        {/* Header with Availability and Category Pills */}
-        <div
+        {activeTab === 'history' ? (
+          <ServiceHistory
+            onBackToDashboard={() => {
+              setActiveTab('dashboard');
+              navigate('/worker/dashboard');
+            }}
+            onRaiseComplaint={handleOpenBookingComplaint}
+            complaintsList={complaintsList}
+            onRefreshComplaints={fetchWorkerComplaints}
+          />
+        ) : activeTab === 'complaints' ? (
+          <WorkerComplaints
+            complaints={complaintsList}
+            loading={loadingComplaints}
+            onOpenComplaintModal={() => {
+              if (jobsData.assignedJobs.length > 0) {
+                handleOpenBookingComplaint(jobsData.assignedJobs[0]);
+              } else {
+                notify('Please select an active booking from your dashboard to raise a complaint.', 'info');
+                setActiveTab('dashboard');
+                navigate('/worker/dashboard');
+              }
+            }}
+            onRefresh={fetchWorkerComplaints}
+          />
+        ) : activeTab === 'applications' ? (
+          <WorkerApplications
+            applications={additionalApplications}
+            approvedCategories={user?.approvedCategories || []}
+            loading={loadingApplications}
+            onOpenApplyModal={() => {
+              setApplyError('');
+              setIsApplyModalOpen(true);
+            }}
+            onRefresh={fetchAdditionalApplications}
+          />
+        ) : (
+          <>
+            {/* Header with Availability and Category Pills */}
+            <div
           className="card"
           style={{
             marginBottom: '28px',
@@ -524,8 +774,24 @@ export default function WorkerDashboard() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button
+              type="button"
+              className="btn btn-outline btn-small"
+              data-testid="apply-more-services-btn"
+              onClick={() => {
+                setApplyError('');
+                setIsApplyModalOpen(true);
+              }}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+              title="Apply for additional service categories"
+            >
+              <PlusCircle size={14} />
+              <span>Apply for More Services</span>
+            </button>
+
+            <button
+              type="button"
               className={`btn ${isAvailable ? 'btn-success' : 'btn-outline'} btn-small`}
               onClick={handleToggleAvailability}
               style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
@@ -535,6 +801,7 @@ export default function WorkerDashboard() {
             </button>
 
             <button
+              type="button"
               className="btn btn-navy btn-small"
               onClick={async () => {
                 const ok = await switchRole('customer');
@@ -556,11 +823,20 @@ export default function WorkerDashboard() {
             value={profileData?.stats?.todayJobs ?? 0}
             icon={CalendarDays}
           />
-          <StatCard
-            label="Completed Jobs"
-            value={profileData?.stats?.completedJobs ?? 0}
-            icon={CheckCircle2}
-          />
+          <div
+            onClick={() => {
+              setActiveTab('history');
+              navigate('/worker/dashboard?tab=history');
+            }}
+            style={{ cursor: 'pointer' }}
+            title="Click to view Service History"
+          >
+            <StatCard
+              label="Completed Jobs"
+              value={profileData?.stats?.completedJobs ?? 0}
+              icon={CheckCircle2}
+            />
+          </div>
           <StatCard
             label="Total Earnings"
             value={`₹${(profileData?.stats?.totalEarnings ?? 0).toLocaleString('en-IN')}`}
@@ -618,11 +894,11 @@ export default function WorkerDashboard() {
                   }}
                 >
                   <img
-                    src={req.serviceId?.image || '/assets/images/plumbing.jpg'}
+                    src={getServiceImage(req.serviceId || req)}
                     alt={req.category}
                     onError={(e) => {
                       e.target.onerror = null;
-                      e.target.src = '/assets/images/home-maintenance.jpg';
+                      e.target.src = homeMaintenanceImg;
                     }}
                     style={{
                       width: '64px',
@@ -679,13 +955,15 @@ export default function WorkerDashboard() {
 
                   <div style={{ display: 'flex', gap: '10px' }}>
                     <button
-                      className="btn btn-success btn-small"
+                      data-testid={`accept-request-btn-${req._id}`}
+                      className="btn btn-success btn-small accept-job-btn"
                       onClick={() => handleAcceptJob(req)}
                       style={{ padding: '8px 18px', fontWeight: 700 }}
                     >
                       <Check size={16} /> Accept
                     </button>
                     <button
+                      data-testid={`reject-request-btn-${req._id}`}
                       className="btn btn-danger btn-small"
                       onClick={() => handleRejectJob(req)}
                       style={{ padding: '8px 14px' }}
@@ -723,11 +1001,21 @@ export default function WorkerDashboard() {
                 </thead>
                 <tbody>
                   {jobsData.assignedJobs.map((job) => (
-                    <tr key={job._id}>
+                    <tr key={job._id} data-testid={`booking-card-${job.bookingId || job._id}`}>
                       <td>
-                        <strong>{job.serviceId?.name || job.category}</strong>
-                        <div style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>
-                          Customer: {job.customerId?.name} ({job.contactNumber})
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                          <span className="badge badge-accepted" style={{ fontWeight: 800 }}>
+                            #{job.bookingId}
+                          </span>
+                          <span className="badge badge-pending" style={{ fontSize: '11px' }}>
+                            {job.category}
+                          </span>
+                        </div>
+                        <strong style={{ fontSize: '14px', color: 'var(--primary-navy)' }}>
+                          {job.serviceId?.name || job.serviceName || job.category}
+                        </strong>
+                        <div style={{ fontSize: '12px', color: 'var(--secondary-text)', marginTop: '2px' }}>
+                          Customer: <strong>{job.customerId?.name || 'Customer'}</strong> {job.contactNumber ? `(${job.contactNumber})` : ''}
                         </div>
                         {job.problemPhotos && job.problemPhotos.length > 0 && (
                           <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
@@ -742,6 +1030,27 @@ export default function WorkerDashboard() {
                             ))}
                           </div>
                         )}
+                        {/* Show Complaint Status Badge if a complaint exists for this booking (Requirement 5) */}
+                        {(() => {
+                          const jobComp = complaintsList.find(
+                            (c) =>
+                              (c.bookingId?._id || c.bookingId) === job._id ||
+                              (c.bookingId?.bookingId || c.bookingId) === job.bookingId
+                          );
+                          if (!jobComp) return null;
+                          return (
+                            <div style={{ marginTop: '6px' }}>
+                              <span
+                                className={`badge badge-${jobComp.status.toLowerCase().replace(/\s+/g, '')}`}
+                                data-testid={`booking-complaint-badge-${job.bookingId}`}
+                                style={{ fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                title={`Complaint ID: ${jobComp.complaintId} • Category: ${jobComp.category}`}
+                              >
+                                <AlertCircle size={11} /> Complaint: {jobComp.status}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td>
                         {new Date(job.bookingDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
@@ -757,19 +1066,34 @@ export default function WorkerDashboard() {
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                          {/* START JOB BUTTON (Requirement 3: Only when Accepted) */}
+                          {/* START JOB BUTTON */}
                           {job.status === 'Accepted' && (
                             <button
                               className="btn btn-navy btn-small"
-                              onClick={() => handleStartJob(job._id)}
+                              onClick={() => handleStartJob(job)}
                               style={{ display: 'flex', alignItems: 'center', gap: '5px' }}
                             >
                               <Play size={14} /> Start Job
                             </button>
                           )}
 
+                          {/* AWAITING ARRIVAL VERIFICATION BUTTON */}
+                          {job.status === 'Awaiting Arrival Verification' && (
+                            <button
+                              className="btn btn-navy btn-small"
+                              onClick={() => {
+                                setArrivalOtpModalJob(job);
+                                setArrivalOtpInput('');
+                                setOtpError('');
+                              }}
+                              style={{ display: 'flex', alignItems: 'center', gap: '5px', background: '#0284c7' }}
+                            >
+                              <ShieldAlert size={14} /> Enter Arrival Code
+                            </button>
+                          )}
+
                           {/* JOB IN PROGRESS BADGE (Requirement 3: Replaces Start Job once started) */}
-                          {job.status === 'In Progress' && (
+                          {['In Progress', 'in-progress', 'in_progress'].includes(job.status) && (
                             <span
                               className="badge badge-accepted"
                               style={{
@@ -785,13 +1109,18 @@ export default function WorkerDashboard() {
                             </span>
                           )}
 
-                          {/* REPORT PROBLEM BUTTON (Requirement 7) */}
+                          {/* RAISE COMPLAINT BUTTON ON EVERY BOOKING (Requirement 2) */}
                           <button
+                            type="button"
                             className="btn btn-outline btn-small"
-                            onClick={() => handleOpenReportModal(job)}
-                            style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+                            data-testid={`raise-complaint-btn-${job.bookingId}`}
+                            data-booking-id={job.bookingId}
+                            onClick={() => handleOpenBookingComplaint(job)}
+                            style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#dc2626', borderColor: '#fca5a5' }}
+                            title={`Raise a complaint against booking #${job.bookingId}`}
                           >
-                            <AlertCircle size={14} /> Report Problem
+                            <AlertCircle size={14} />
+                            <span>Raise Complaint</span>
                           </button>
                         </div>
                       </td>
@@ -802,53 +1131,266 @@ export default function WorkerDashboard() {
             </div>
           )}
         </section>
+        </>
+      )}
       </main>
 
-      {/* REPORT WORKPLACE PROBLEM MODAL (Requirement 7) */}
-      {reportModalJob && (
+      {/* ARRIVAL OTP VERIFICATION MODAL */}
+      {arrivalOtpModalJob && (
         <Modal
-          isOpen={Boolean(reportModalJob)}
-          onClose={() => setReportModalJob(null)}
-          title="Report Workplace Problem"
+          isOpen={Boolean(arrivalOtpModalJob)}
+          onClose={() => setArrivalOtpModalJob(null)}
+          title="Customer Arrival Verification"
         >
-          <form onSubmit={handleSubmitProblem}>
-            <p style={{ color: 'var(--secondary-text)', fontSize: '13px', marginBottom: '18px' }}>
-              Report issues encountered at the customer site. Your report will be logged with administrators.
-            </p>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-              <div className="form-group">
-                <label>Booking ID</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={reportModalJob.bookingId}
-                  readOnly
-                  style={{ background: '#f8fafc', fontWeight: 700 }}
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Customer Name</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={reportModalJob.customerId?.name || 'Customer'}
-                  readOnly
-                  style={{ background: '#f8fafc' }}
-                />
+          <div style={{ marginBottom: '10px' }}>
+            <div
+              style={{
+                background: '#f0f9ff',
+                border: '1px solid #bae6fd',
+                borderRadius: 'var(--radius-md)',
+                padding: '16px',
+                marginBottom: '18px',
+                display: 'flex',
+                gap: '12px',
+                alignItems: 'flex-start'
+              }}
+            >
+              <ShieldAlert size={22} color="#0284c7" style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div>
+                <strong style={{ color: '#0369a1', fontSize: '14px', display: 'block', marginBottom: '4px' }}>
+                  Verify Customer Code
+                </strong>
+                <p style={{ color: '#075985', fontSize: '13px', margin: 0, lineHeight: 1.4 }}>
+                  Ask the customer for the 6-digit arrival verification code displayed in their dashboard to confirm your arrival and begin work.
+                </p>
               </div>
             </div>
 
-            <div className="form-group" style={{ marginBottom: '14px' }}>
-              <label>Problem Category *</label>
+            <form onSubmit={handleVerifyArrivalOtp}>
+              <div className="form-group" style={{ marginBottom: '20px' }}>
+                <label style={{ fontWeight: 700, fontSize: '13px', color: 'var(--primary-navy)' }}>
+                  Enter 6-Digit Arrival Code *
+                </label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  inputMode="numeric"
+                  placeholder="e.g. 123456"
+                  className="form-input"
+                  style={{
+                    fontSize: '24px',
+                    letterSpacing: '8px',
+                    textAlign: 'center',
+                    fontWeight: 800,
+                    padding: '12px'
+                  }}
+                  value={arrivalOtpInput}
+                  onChange={(e) => setArrivalOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  autoFocus
+                  required
+                />
+              </div>
+
+              {otpError && (
+                <div
+                  style={{
+                    background: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    color: '#b91c1c',
+                    padding: '10px 14px',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '13px',
+                    marginBottom: '16px'
+                  }}
+                >
+                  {otpError}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => setArrivalOtpModalJob(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-navy"
+                  disabled={verifyingOtp || arrivalOtpInput.length !== 6}
+                >
+                  {verifyingOtp ? 'Verifying...' : 'Verify Code & Start Job'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </Modal>
+      )}
+
+      {/* MODAL: BOOKING-SPECIFIC WORKER COMPLAINT (Requirement 3) */}
+      {bookingComplaintJob && (
+        <Modal
+          isOpen={Boolean(bookingComplaintJob)}
+          onClose={() => {
+            setBookingComplaintJob(null);
+            setComplaintError('');
+          }}
+          title={`Raise Complaint — Booking #${bookingComplaintJob.bookingId}`}
+          maxWidth="640px"
+        >
+          <form onSubmit={handleSubmitBookingComplaint}>
+            <p style={{ color: 'var(--secondary-text)', fontSize: '13px', marginBottom: '16px', lineHeight: 1.5 }}>
+              Submit a formal grievance regarding this customer or service job. All booking details are securely associated from this record.
+            </p>
+
+            {complaintError && (
+              <div
+                style={{
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  color: '#b91c1c',
+                  padding: '10px 14px',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: '13px',
+                  marginBottom: '16px'
+                }}
+              >
+                {complaintError}
+              </div>
+            )}
+
+            {/* Read-Only Pre-populated Booking Details (Requirement 3) */}
+            <div
+              style={{
+                backgroundColor: '#f8fafc',
+                border: '1px solid var(--border-color)',
+                borderRadius: 'var(--radius-md)',
+                padding: '14px 16px',
+                marginBottom: '18px',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, 1fr)',
+                gap: '12px',
+                fontSize: '13px'
+              }}
+            >
+              <div>
+                <span style={{ color: 'var(--secondary-text)', display: 'block', fontSize: '11px', fontWeight: 600 }}>
+                  Booking Reference
+                </span>
+                <strong data-testid="complaint-modal-booking-id" style={{ color: 'var(--primary-navy)' }}>
+                  #{bookingComplaintJob.bookingId}
+                </strong>
+                <span style={{ fontSize: '10px', color: '#64748b', display: 'block' }}>
+                  ID: {bookingComplaintJob._id}
+                </span>
+              </div>
+              <div>
+                <span style={{ color: 'var(--secondary-text)', display: 'block', fontSize: '11px', fontWeight: 600 }}>
+                  Service Category
+                </span>
+                <strong data-testid="complaint-modal-category" style={{ color: 'var(--primary-navy)' }}>
+                  {bookingComplaintJob.category}
+                </strong>
+              </div>
+              <div>
+                <span style={{ color: 'var(--secondary-text)', display: 'block', fontSize: '11px', fontWeight: 600 }}>
+                  Service Name
+                </span>
+                <strong data-testid="complaint-modal-service" style={{ color: 'var(--primary-navy)' }}>
+                  {bookingComplaintJob.serviceId?.name || bookingComplaintJob.serviceName || bookingComplaintJob.category}
+                </strong>
+              </div>
+              <div>
+                <span style={{ color: 'var(--secondary-text)', display: 'block', fontSize: '11px', fontWeight: 600 }}>
+                  Customer Details
+                </span>
+                <strong data-testid="complaint-modal-customer" style={{ color: 'var(--primary-navy)' }}>
+                  {bookingComplaintJob.customerId?.name || 'Customer'}
+                </strong>
+                <span data-testid="complaint-modal-customer-id" style={{ fontSize: '10px', color: '#64748b', display: 'block' }}>
+                  ID: {bookingComplaintJob.customerId?._id || (typeof bookingComplaintJob.customerId === 'string' ? bookingComplaintJob.customerId : 'N/A')}
+                </span>
+                {bookingComplaintJob.contactNumber && (
+                  <span style={{ fontSize: '11px', color: 'var(--secondary-text)', display: 'block' }}>
+                    +91 {bookingComplaintJob.contactNumber}
+                  </span>
+                )}
+              </div>
+              <div>
+                <span style={{ color: 'var(--secondary-text)', display: 'block', fontSize: '11px', fontWeight: 600 }}>
+                  Booking Status
+                </span>
+                <span
+                  data-testid="complaint-modal-status"
+                  className={`badge badge-${(bookingComplaintJob.status || '').toLowerCase().replace(/\s+/g, '')}`}
+                >
+                  {bookingComplaintJob.status || 'Assigned'}
+                </span>
+              </div>
+              <div>
+                <span style={{ color: 'var(--secondary-text)', display: 'block', fontSize: '11px', fontWeight: 600 }}>
+                  Assigned Technician
+                </span>
+                <strong data-testid="complaint-modal-worker" style={{ color: 'var(--primary-navy)' }}>
+                  {user?.name || 'Technician'}
+                </strong>
+              </div>
+              <div>
+                <span style={{ color: 'var(--secondary-text)', display: 'block', fontSize: '11px', fontWeight: 600 }}>
+                  Customer Service Address
+                </span>
+                <span style={{ fontSize: '12px', color: 'var(--primary-text)' }}>
+                  {bookingComplaintJob.address || 'Address on file'}
+                </span>
+              </div>
+            </div>
+
+            {/* Previously Submitted Complaints for this booking if any (Requirement 5) */}
+            {(() => {
+              const existingForThisBooking = complaintsList.filter(
+                (c) =>
+                  (c.bookingId?._id || c.bookingId) === bookingComplaintJob._id ||
+                  (c.bookingId?.bookingId || c.bookingId) === bookingComplaintJob.bookingId
+              );
+              if (existingForThisBooking.length === 0) return null;
+
+              return (
+                <div style={{ marginBottom: '18px', padding: '12px', background: '#eff6ff', borderRadius: 'var(--radius-md)', border: '1px solid #bfdbfe' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#1e40af', marginBottom: '8px' }}>
+                    Previously Submitted Complaint for this Booking ({existingForThisBooking.length}):
+                  </div>
+                  {existingForThisBooking.map((ec) => (
+                    <div key={ec._id} style={{ fontSize: '12px', color: '#1e3a8a', padding: '6px 0', borderBottom: '1px dashed #dbeafe' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <strong>{ec.complaintId} — {ec.category}</strong>
+                        <span className={`badge badge-${ec.status.toLowerCase().replace(/\s+/g, '')}`}>{ec.status}</span>
+                      </div>
+                      <p style={{ margin: '4px 0 0', color: '#334155' }}>"{ec.description}"</p>
+                      {ec.adminNotes && (
+                        <div style={{ marginTop: '4px', fontWeight: 600, color: '#047857' }}>
+                          Admin Response: {ec.adminNotes}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
+            {/* Complaint Category (Required) */}
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label style={{ fontWeight: 700, fontSize: '13px', color: 'var(--primary-navy)' }}>
+                Complaint Category *
+              </label>
               <select
                 className="form-select"
-                value={reportForm.category}
-                onChange={(e) => setReportForm({ ...reportForm, category: e.target.value })}
+                data-testid="complaint-category-select"
+                value={complaintForm.category}
+                onChange={(e) => setComplaintForm({ ...complaintForm, category: e.target.value })}
                 required
               >
-                {WORKER_PROBLEM_CATEGORIES.map((cat) => (
+                {WORKER_COMPLAINT_CATEGORIES.map((cat) => (
                   <option key={cat} value={cat}>
                     {cat}
                   </option>
@@ -856,43 +1398,245 @@ export default function WorkerDashboard() {
               </select>
             </div>
 
-            <div className="form-group" style={{ marginBottom: '14px' }}>
-              <label>Problem Description *</label>
+            {/* Complaint Description (Required) */}
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label style={{ fontWeight: 700, fontSize: '13px', color: 'var(--primary-navy)' }}>
+                Complaint Description *
+              </label>
               <textarea
                 rows="4"
                 className="form-textarea"
-                placeholder="Describe the issue in detail (e.g., customer behavior, site safety, scope mismatch)..."
-                value={reportForm.description}
-                onChange={(e) => setReportForm({ ...reportForm, description: e.target.value })}
+                data-testid="complaint-description-input"
+                placeholder="Detail what happened with this booking, customer misconduct, incorrect address, unsafe hazards, or dispute specifics..."
+                value={complaintForm.description}
+                onChange={(e) => setComplaintForm({ ...complaintForm, description: e.target.value })}
                 required
               />
             </div>
 
+            {/* Optional Photo Attachment */}
             <div className="form-group" style={{ marginBottom: '20px' }}>
-              <label>Optional Supporting Image URL / Photo Link</label>
+              <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--secondary-text)' }}>
+                Optional Attachment / Photo Link
+              </label>
               <input
                 type="text"
+                data-testid="complaint-attachment-input"
                 className="form-input"
                 placeholder="e.g. /assets/images/home-maintenance.jpg or photo URL"
-                value={reportForm.attachment}
-                onChange={(e) => setReportForm({ ...reportForm, attachment: e.target.value })}
+                value={complaintForm.attachment}
+                onChange={(e) => setComplaintForm({ ...complaintForm, attachment: e.target.value })}
               />
             </div>
 
+            {/* Action buttons */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
               <button
                 type="button"
                 className="btn btn-outline"
-                onClick={() => setReportModalJob(null)}
+                onClick={() => {
+                  setBookingComplaintJob(null);
+                  setComplaintError('');
+                }}
+                disabled={submittingComplaint}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn-danger"
+                data-testid="submit-complaint-btn"
+                disabled={submittingComplaint}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700 }}
+              >
+                <Send size={14} />
+                {submittingComplaint ? 'Submitting...' : 'Submit Complaint'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* MODAL: APPLY FOR MORE SERVICES (Feature 2) */}
+      {isApplyModalOpen && (
+        <Modal
+          isOpen={isApplyModalOpen}
+          onClose={() => {
+            setIsApplyModalOpen(false);
+            setApplyError('');
+          }}
+          title="Apply for More Service Categories"
+          maxWidth="640px"
+        >
+          <form onSubmit={handleSubmitApplyServices}>
+            <p style={{ color: 'var(--secondary-text)', fontSize: '13px', marginBottom: '18px', lineHeight: 1.5 }}>
+              Expand your trade offerings to receive customer booking requests in new categories. Select the trade categories you wish to add for administrator review.
+            </p>
+
+            {applyError && (
+              <div
+                style={{
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  color: '#b91c1c',
+                  padding: '10px 14px',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: '13px',
+                  marginBottom: '16px'
+                }}
+              >
+                {applyError}
+              </div>
+            )}
+
+            {/* Currently Approved Categories (Read-Only) */}
+            <div className="form-group" style={{ marginBottom: '18px' }}>
+              <label style={{ fontWeight: 700, fontSize: '13px', color: 'var(--primary-navy)', display: 'block', marginBottom: '6px' }}>
+                Currently Approved Categories (Read-Only)
+              </label>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {(profileData?.worker?.approvedCategories || user?.approvedCategories || []).length > 0 ? (
+                  (profileData?.worker?.approvedCategories || user?.approvedCategories || []).map((cat, idx) => (
+                    <span
+                      key={idx}
+                      className="badge badge-completed"
+                      style={{ fontSize: '12px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      <CheckCircle2 size={12} /> {cat} (Active)
+                    </span>
+                  ))
+                ) : (
+                  <span style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>None</span>
+                )}
+              </div>
+            </div>
+
+            {/* Additional Categories Available (Checkboxes) */}
+            <div className="form-group" style={{ marginBottom: '18px' }}>
+              <label style={{ fontWeight: 700, fontSize: '13px', color: 'var(--primary-navy)', display: 'block', marginBottom: '8px' }}>
+                Select Additional Categories to Apply For *
+              </label>
+
+              {(() => {
+                const currentApproved = profileData?.worker?.approvedCategories || user?.approvedCategories || [];
+                const pendingApps = additionalApplications.filter((a) => a.applicationStatus === 'pending');
+                const pendingCats = pendingApps.flatMap((a) => a.requestedCategories || a.selectedCategories || []);
+
+                return (
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+                      gap: '10px',
+                      backgroundColor: '#f8fafc',
+                      padding: '14px',
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid var(--border-color)',
+                      maxHeight: '220px',
+                      overflowY: 'auto'
+                    }}
+                  >
+                    {allCategoriesList.map((cat) => {
+                      const isApproved = currentApproved.includes(cat);
+                      const isPending = pendingCats.includes(cat);
+                      const isSelected = (applyForm.requestedCategories || []).includes(cat);
+                      const isDisabled = isApproved || isPending;
+
+                      return (
+                        <label
+                          key={cat}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            fontSize: '13px',
+                            cursor: isDisabled ? 'not-allowed' : 'pointer',
+                            padding: '6px 10px',
+                            borderRadius: 'var(--radius-sm)',
+                            backgroundColor: isSelected ? '#eff6ff' : 'var(--white)',
+                            border: `1px solid ${isSelected ? '#3b82f6' : '#e2e8f0'}`,
+                            color: isDisabled ? '#94a3b8' : 'var(--primary-text)',
+                            fontWeight: isSelected ? 600 : 400
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            data-testid={`apply-category-checkbox-${cat}`}
+                            checked={isApproved || isSelected}
+                            disabled={isDisabled}
+                            onChange={() => handleToggleCategorySelect(cat)}
+                            style={{ accentColor: 'var(--primary-navy)' }}
+                          />
+                          <span>
+                            {cat}
+                            {isApproved && <span style={{ fontSize: '10px', display: 'block', color: '#16a34a' }}>Approved</span>}
+                            {isPending && <span style={{ fontSize: '10px', display: 'block', color: '#b45309' }}>Pending Review</span>}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+              <span style={{ fontSize: '12px', color: 'var(--secondary-text)', marginTop: '4px', display: 'block' }}>
+                You can select one or multiple categories you have skills and qualifications in.
+              </span>
+            </div>
+
+            {/* Years of Experience */}
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label style={{ fontWeight: 700, fontSize: '13px', color: 'var(--primary-navy)' }}>
+                Relevant Experience in Requested Categories (Years) *
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="40"
+                className="form-input"
+                data-testid="apply-experience-input"
+                value={applyForm.experience}
+                onChange={(e) => setApplyForm({ ...applyForm, experience: e.target.value })}
+                required
+              />
+            </div>
+
+            {/* Skills & Qualification Details */}
+            <div className="form-group" style={{ marginBottom: '20px' }}>
+              <label style={{ fontWeight: 700, fontSize: '13px', color: 'var(--primary-navy)' }}>
+                Skills, Tools & Qualification Details
+              </label>
+              <textarea
+                rows="3"
+                className="form-textarea"
+                data-testid="apply-qualifications-input"
+                placeholder="Mention trade certifications, vocational diplomas, specialized tools you own, and prior project experience..."
+                value={applyForm.professionalDescription}
+                onChange={(e) => setApplyForm({ ...applyForm, professionalDescription: e.target.value })}
+              />
+            </div>
+
+            {/* Action buttons */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => {
+                  setIsApplyModalOpen(false);
+                  setApplyError('');
+                }}
+                disabled={submittingApply}
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 className="btn btn-navy"
-                disabled={submittingReport}
+                data-testid="submit-apply-services-btn"
+                disabled={submittingApply}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700 }}
               >
-                <Send size={15} /> {submittingReport ? 'Submitting...' : 'Submit Report'}
+                <Plus size={14} />
+                {submittingApply ? 'Submitting...' : 'Submit Application'}
               </button>
             </div>
           </form>

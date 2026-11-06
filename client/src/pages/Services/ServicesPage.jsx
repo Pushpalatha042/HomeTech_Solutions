@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Search, Star, Filter, ArrowRight, ArrowUpDown } from 'lucide-react';
 import api from '../../api';
+import { getServiceImage, homeMaintenanceImg } from '../../assets/images';
 
 export default function ServicesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -132,7 +133,7 @@ export default function ServicesPage() {
       ) : services.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '50px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <img
-            src="/assets/images/home-maintenance.jpg"
+            src={homeMaintenanceImg}
             alt="No Services Found"
             style={{ width: '140px', height: '90px', objectFit: 'cover', borderRadius: 'var(--radius-md)', marginBottom: '16px', opacity: 0.85 }}
           />
@@ -150,11 +151,11 @@ export default function ServicesPage() {
             <div key={service._id} className="service-card">
               <Link to={`/services/${service._id}`}>
                 <img
-                  src={service.image || '/assets/images/plumbing.jpg'}
+                  src={getServiceImage(service)}
                   alt={service.name}
                   onError={(e) => {
                     e.target.onerror = null;
-                    e.target.src = '/assets/images/home-maintenance.jpg';
+                    e.target.src = homeMaintenanceImg;
                   }}
                   className="service-card-image"
                   style={{ height: '200px', objectFit: 'cover' }}

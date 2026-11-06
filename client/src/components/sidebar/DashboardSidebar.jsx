@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
   CalendarDays,
@@ -17,13 +17,15 @@ import {
   Settings,
   CheckCircle2,
   Clock,
-  AlertCircle
+  AlertCircle,
+  History
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 export default function DashboardSidebar({ activeTab, onSelectTab, onOpenWorkerModal }) {
   const { user, logout, switchRole } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleRoleSwitch = async (targetRole) => {
     const success = await switchRole(targetRole);
@@ -92,71 +94,97 @@ export default function DashboardSidebar({ activeTab, onSelectTab, onOpenWorkerM
           <>
             <button
               className={`sidebar-item ${activeTab === 'dashboard' ? 'active' : ''}`}
-              onClick={() => onSelectTab ? onSelectTab('dashboard') : navigate('/customer/dashboard')}
+              onClick={() => {
+                if (location.pathname === '/customer/dashboard') {
+                  if (onSelectTab) onSelectTab('dashboard');
+                } else {
+                  navigate('/customer/dashboard');
+                }
+              }}
             >
               <LayoutDashboard size={18} />
               <span>Dashboard</span>
             </button>
             <button
+              className={`sidebar-item ${activeTab === 'ongoing' ? 'active' : ''}`}
+              onClick={() => {
+                if (location.pathname === '/customer/dashboard') {
+                  if (onSelectTab) onSelectTab('ongoing');
+                } else {
+                  navigate('/customer/dashboard?tab=ongoing');
+                }
+              }}
+            >
+              <Clock size={18} />
+              <span>Ongoing Jobs</span>
+            </button>
+            <button
               className={`sidebar-item ${activeTab === 'bookings' ? 'active' : ''}`}
-              onClick={() => onSelectTab ? onSelectTab('bookings') : navigate('/customer/bookings')}
+              onClick={() => {
+                if (location.pathname === '/customer/bookings') {
+                  if (onSelectTab) onSelectTab('bookings');
+                } else {
+                  navigate('/customer/bookings');
+                }
+              }}
             >
               <CalendarDays size={18} />
               <span>My Bookings</span>
             </button>
             <button
               className={`sidebar-item ${activeTab === 'payments' ? 'active' : ''}`}
-              onClick={() => onSelectTab ? onSelectTab('payments') : navigate('/customer/payments')}
+              onClick={() => {
+                if (location.pathname === '/customer/payments') {
+                  if (onSelectTab) onSelectTab('payments');
+                } else {
+                  navigate('/customer/payments');
+                }
+              }}
             >
               <CreditCard size={18} />
               <span>Payments</span>
             </button>
             <button
               className={`sidebar-item ${activeTab === 'profile' ? 'active' : ''}`}
-              onClick={() => onSelectTab && onSelectTab('profile')}
+              onClick={() => {
+                if (location.pathname === '/customer/dashboard') {
+                  if (onSelectTab) onSelectTab('profile');
+                } else {
+                  navigate('/customer/dashboard?tab=profile');
+                }
+              }}
             >
               <User size={18} />
               <span>Profile</span>
             </button>
             <button
               className={`sidebar-item ${activeTab === 'addresses' ? 'active' : ''}`}
-              onClick={() => onSelectTab && onSelectTab('addresses')}
+              onClick={() => {
+                if (location.pathname === '/customer/dashboard') {
+                  if (onSelectTab) onSelectTab('addresses');
+                } else {
+                  navigate('/customer/dashboard?tab=addresses');
+                }
+              }}
             >
               <MapPin size={18} />
               <span>Addresses</span>
             </button>
 
-            {/* Worker Application status or button */}
-            {!isWorkerApproved && (
-              <button
+            {user?.workerStatus === 'pending' && (
+              <div
                 className="sidebar-item"
                 style={{
-                  backgroundColor:
-                    user?.workerStatus === 'pending'
-                      ? 'var(--warning-bg)'
-                      : 'var(--accent-yellow-light)',
-                  color: 'var(--primary-navy)',
-                  fontWeight: 700
+                  backgroundColor: 'var(--warning-bg)',
+                  color: '#92400e',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'default'
                 }}
-                onClick={onOpenWorkerModal}
               >
-                {user?.workerStatus === 'pending' ? (
-                  <>
-                    <Clock size={18} color="#b45309" />
-                    <span>Worker App: Pending</span>
-                  </>
-                ) : user?.workerStatus === 'rejected' ? (
-                  <>
-                    <Briefcase size={18} />
-                    <span>Re-apply as Worker</span>
-                  </>
-                ) : (
-                  <>
-                    <Briefcase size={18} />
-                    <span>Join as Worker</span>
-                  </>
-                )}
-              </button>
+                <Clock size={16} color="#b45309" />
+                <span>Worker App: Pending</span>
+              </div>
             )}
 
             <button
@@ -169,8 +197,51 @@ export default function DashboardSidebar({ activeTab, onSelectTab, onOpenWorkerM
           </>
         )}
 
-        {/* Requirement 2: Worker sidebar has no menu items (Dashboard, Requests, Jobs, Earnings, Availability, Tracking, Profile removed) */}
-        {role === 'worker' && null}
+        {/* Worker Navigation Menu */}
+        {role === 'worker' && (
+          <>
+            <button
+              className={`sidebar-item ${activeTab === 'dashboard' ? 'active' : ''}`}
+              onClick={() => {
+                if (onSelectTab) onSelectTab('dashboard');
+                navigate('/worker/dashboard');
+              }}
+            >
+              <LayoutDashboard size={18} />
+              <span>Dashboard</span>
+            </button>
+            <button
+              className={`sidebar-item ${activeTab === 'history' ? 'active' : ''}`}
+              onClick={() => {
+                if (onSelectTab) onSelectTab('history');
+                navigate('/worker/dashboard?tab=history');
+              }}
+            >
+              <History size={18} />
+              <span>Service History</span>
+            </button>
+            <button
+              className={`sidebar-item ${activeTab === 'complaints' ? 'active' : ''}`}
+              onClick={() => {
+                if (onSelectTab) onSelectTab('complaints');
+                navigate('/worker/dashboard?tab=complaints');
+              }}
+            >
+              <AlertCircle size={18} />
+              <span>My Complaints</span>
+            </button>
+            <button
+              className={`sidebar-item ${activeTab === 'applications' ? 'active' : ''}`}
+              onClick={() => {
+                if (onSelectTab) onSelectTab('applications');
+                navigate('/worker/dashboard?tab=applications');
+              }}
+            >
+              <Layers size={18} />
+              <span>My Service Applications</span>
+            </button>
+          </>
+        )}
 
         {role === 'admin' && (
           <>

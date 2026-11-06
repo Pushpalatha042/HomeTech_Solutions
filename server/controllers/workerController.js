@@ -3,6 +3,8 @@ import User from '../models/User.js';
 import Booking from '../models/Booking.js';
 import ServiceCategory from '../models/ServiceCategory.js';
 import WorkRequest from '../models/WorkRequest.js';
+import Review from '../models/Review.js';
+import Complaint from '../models/Complaint.js';
 
 // 1. Submit Worker Application (Customer -> Worker)
 export async function submitWorkerApplication(req, res) {
@@ -187,6 +189,252 @@ export async function rejectWorkerApplication(req, res) {
   }
 }
 
+// 5b. Worker: Submit Additional Category Application (POST /api/workers/additional-categories)
+export async function submitAdditionalCategoryApplication(req, res) {
+  try {
+    const userId = req.user._id;
+
+    // Verify worker is approved
+    const user = await User.findById(userId);
+    if (!user || !user.roles.includes('worker') || user.workerStatus !== 'approved') {
+      return res.status(403).json({ message: 'Only approved workers can apply for additional service categories.' });
+    }
+
+    const {
+      requestedCategories = [],
+      experience = 1,
+      skills = [],
+      professionalDescription = '',
+      documents = []
+    } = req.body;
+
+    if (!Array.isArray(requestedCategories) || requestedCategories.length === 0) {
+      return res.status(400).json({ message: 'Please select at least one additional service category.' });
+    }
+
+    const currentApproved = user.approvedCategories || [];
+
+    // Restriction 1: Do not allow selecting categories already approved
+    const alreadyApproved = requestedCategories.filter((c) => currentApproved.includes(c));
+    if (alreadyApproved.length > 0) {
+      return res.status(400).json({
+        message: `You already have the following category(ies) approved: ${alreadyApproved.join(', ')}.`
+      });
+    }
+
+    // Restriction 2: Do not allow duplicate applications for the same category while an application is pending
+    const pendingApps = await WorkerApplication.find({
+      userId,
+      applicationType: 'additional_category',
+      applicationStatus: 'pending'
+    });
+    const pendingCategories = pendingApps.flatMap((a) => a.requestedCategories || a.selectedCategories || []);
+    const duplicatePending = requestedCategories.filter((c) => pendingCategories.includes(c));
+    if (duplicatePending.length > 0) {
+      return res.status(400).json({
+        message: `You already have a pending application under review for: ${duplicatePending.join(', ')}.`
+      });
+    }
+
+    const application = await WorkerApplication.create({
+      userId,
+      fullName: user.name,
+      phone: user.phone,
+      email: user.email,
+      profileImage: user.profileImage || '',
+      applicationType: 'additional_category',
+      currentCategories: currentApproved,
+      requestedCategories,
+      selectedCategories: requestedCategories,
+      experience: Number(experience) || 1,
+      skills: Array.isArray(skills) ? skills : (skills ? [skills] : []),
+      professionalDescription: String(professionalDescription).trim(),
+      documents: Array.isArray(documents) ? documents : [],
+      applicationStatus: 'pending',
+      adminNotes: '',
+      rejectionReason: ''
+    });
+
+    const populatedApp = await WorkerApplication.findById(application._id)
+      .populate('userId', 'name phone email profileImage approvedCategories');
+
+    // Notify Admin via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      io.to('admin-tracking').emit('new-worker-application', populatedApp);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Your additional service category application has been submitted successfully for admin review.',
+      application: populatedApp
+    });
+  } catch (err) {
+    console.error('submitAdditionalCategoryApplication error:', err);
+    res.status(500).json({ message: 'Failed to submit additional category application.' });
+  }
+}
+
+// 5c. Worker: Get My Additional Category Applications (GET /api/workers/additional-categories/my)
+export async function getMyAdditionalCategoryApplications(req, res) {
+  try {
+    const userId = req.user._id;
+    const applications = await WorkerApplication.find({
+      userId,
+      applicationType: 'additional_category'
+    })
+      .populate('reviewedBy', 'name email')
+      .sort({ createdAt: -1 });
+
+    res.json(applications);
+  } catch (err) {
+    console.error('getMyAdditionalCategoryApplications error:', err);
+    res.status(500).json({ message: 'Failed to fetch your applications.' });
+  }
+}
+
+// 5d. Worker/Admin: Get Single Additional Application by ID (GET /api/workers/additional-categories/:id)
+export async function getAdditionalCategoryApplicationById(req, res) {
+  try {
+    const { id } = req.params;
+    const application = await WorkerApplication.findById(id)
+      .populate('userId', 'name phone email profileImage approvedCategories')
+      .populate('reviewedBy', 'name email');
+
+    if (!application) {
+      return res.status(404).json({ message: 'Application not found.' });
+    }
+
+    // Ownership check: must be owner or admin
+    if (application.userId?._id?.toString() !== req.user._id.toString() && req.user.activeRole !== 'admin') {
+      return res.status(403).json({ message: 'Access denied to this application.' });
+    }
+
+    res.json(application);
+  } catch (err) {
+    console.error('getAdditionalCategoryApplicationById error:', err);
+    res.status(500).json({ message: 'Failed to fetch application details.' });
+  }
+}
+
+// 5e. Admin: List All Additional Category Applications (GET /api/admin/worker-applications/additional)
+export async function getAllAdditionalCategoryApplications(req, res) {
+  try {
+    const { status } = req.query;
+    const filter = { applicationType: 'additional_category' };
+    if (status && status !== 'all') {
+      filter.applicationStatus = status;
+    }
+
+    const applications = await WorkerApplication.find(filter)
+      .populate('userId', 'name phone email profileImage approvedCategories rating')
+      .populate('reviewedBy', 'name email')
+      .sort({ createdAt: -1 });
+
+    res.json(applications);
+  } catch (err) {
+    console.error('getAllAdditionalCategoryApplications error:', err);
+    res.status(500).json({ message: 'Failed to fetch additional category applications.' });
+  }
+}
+
+// 5f. Admin: Review (Approve / Reject) Additional Category Application (PUT /api/admin/worker-applications/:id/review-additional)
+export async function reviewAdditionalCategoryApplication(req, res) {
+  try {
+    const { id } = req.params;
+    const {
+      action, // 'approve' | 'reject'
+      approvedCategories = [],
+      rejectedCategories = [],
+      adminNotes = '',
+      rejectionReason = ''
+    } = req.body;
+
+    const application = await WorkerApplication.findById(id);
+    if (!application) {
+      return res.status(404).json({ message: 'Application not found.' });
+    }
+
+    if (action === 'approve') {
+      const finalApproved = (approvedCategories && approvedCategories.length > 0)
+        ? approvedCategories
+        : (application.requestedCategories && application.requestedCategories.length > 0
+            ? application.requestedCategories
+            : application.selectedCategories);
+
+      const finalRejected = rejectedCategories || (application.requestedCategories || []).filter(c => !finalApproved.includes(c));
+
+      application.applicationStatus = (finalRejected.length === 0 || finalApproved.length === (application.requestedCategories || []).length)
+        ? 'approved'
+        : 'partially_approved';
+      application.approvedCategories = finalApproved;
+      application.rejectedCategories = finalRejected;
+      application.adminNotes = adminNotes || 'Approved by administrator.';
+      application.reviewedBy = req.user._id;
+      application.reviewedAt = new Date();
+      await application.save();
+
+      // Add to Worker's approvedCategories in MongoDB
+      const updatedUser = await User.findByIdAndUpdate(
+        application.userId,
+        { $addToSet: { approvedCategories: { $each: finalApproved } } },
+        { new: true }
+      );
+
+      const io = req.app.get('io');
+      if (io) {
+        io.to('admin-tracking').emit('worker-application-updated', application);
+        io.to(`worker:${application.userId}`).emit('category-application-reviewed', {
+          applicationId: application._id,
+          status: application.applicationStatus,
+          approvedCategories: finalApproved,
+          rejectedCategories: finalRejected,
+          adminNotes: application.adminNotes,
+          workerApprovedCategories: updatedUser?.approvedCategories || []
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: `Successfully approved categories: ${finalApproved.join(', ')}`,
+        application,
+        workerApprovedCategories: updatedUser?.approvedCategories || []
+      });
+    } else if (action === 'reject') {
+      const reason = adminNotes || rejectionReason || 'Application does not meet current criteria.';
+      application.applicationStatus = 'rejected';
+      application.approvedCategories = [];
+      application.rejectedCategories = application.requestedCategories || application.selectedCategories;
+      application.rejectionReason = reason;
+      application.adminNotes = reason;
+      application.reviewedBy = req.user._id;
+      application.reviewedAt = new Date();
+      await application.save();
+
+      const io = req.app.get('io');
+      if (io) {
+        io.to('admin-tracking').emit('worker-application-updated', application);
+        io.to(`worker:${application.userId}`).emit('category-application-reviewed', {
+          applicationId: application._id,
+          status: 'rejected',
+          rejectionReason: reason
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: 'Additional category application rejected.',
+        application
+      });
+    } else {
+      return res.status(400).json({ message: 'Invalid action. Must be "approve" or "reject".' });
+    }
+  } catch (err) {
+    console.error('reviewAdditionalCategoryApplication error:', err);
+    res.status(500).json({ message: 'Failed to review additional category application.' });
+  }
+}
+
 // Helper to resolve worker's approved categories with fallback to WorkerApplication
 export async function resolveWorkerCategories(user) {
   let cats = user.approvedCategories || [];
@@ -330,7 +578,14 @@ export async function getWorkerJobs(req, res) {
     // Assigned/Active jobs assigned to this worker
     const assignedJobs = await Booking.find({
       workerId,
-      status: { $in: ['Assigned', 'Accepted', 'Awaiting Arrival Verification', 'In Progress'] }
+      status: {
+        $in: [
+          'Assigned', 'assigned',
+          'Accepted', 'accepted',
+          'Awaiting Arrival Verification', 'awaiting-arrival-verification',
+          'In Progress', 'in-progress', 'in_progress'
+        ]
+      }
     })
       .populate('customerId', 'name phone email address profileImage')
       .populate('serviceId', 'name price image category')
@@ -339,7 +594,7 @@ export async function getWorkerJobs(req, res) {
     // Completed jobs
     const completedJobs = await Booking.find({
       workerId,
-      status: { $in: ['Completed', 'Cancelled'] }
+      status: { $in: ['Completed', 'completed', 'Cancelled', 'cancelled'] }
     })
       .populate('customerId', 'name phone email address profileImage')
       .populate('serviceId', 'name price image category')
@@ -350,8 +605,8 @@ export async function getWorkerJobs(req, res) {
       assignedJobs,
       completedJobs,
       requests: availableRequests,
-      accepted: assignedJobs.filter((j) => ['Accepted', 'Awaiting Arrival Verification', 'Assigned'].includes(j.status)),
-      ongoing: assignedJobs.filter((j) => j.status === 'In Progress'),
+      accepted: assignedJobs.filter((j) => ['Accepted', 'accepted', 'Awaiting Arrival Verification', 'awaiting-arrival-verification', 'Assigned', 'assigned'].includes(j.status)),
+      ongoing: assignedJobs.filter((j) => ['In Progress', 'in-progress', 'in_progress'].includes(j.status)),
       history: completedJobs
     });
   } catch (err) {
@@ -414,6 +669,219 @@ export async function getWorkerJobHistory(req, res) {
   } catch (err) {
     console.error('getWorkerJobHistory error:', err);
     res.status(500).json({ message: 'Failed to fetch worker job history.' });
+  }
+}
+
+// 6f. Worker: Service History with Search, Filter & Pagination (GET /api/worker/service-history)
+export async function getWorkerServiceHistory(req, res) {
+  try {
+    const workerId = req.user._id;
+    const {
+      search = '',
+      category = '',
+      date = '',
+      startDate = '',
+      endDate = '',
+      sort = 'newest',
+      page = 1,
+      limit = 10
+    } = req.query;
+
+    // Base query: Strictly only completed jobs belonging to the authenticated worker
+    const query = {
+      workerId,
+      status: { $regex: /^completed$/i }
+    };
+
+    // Filter by Service Category
+    if (category && category !== 'All' && category !== 'all') {
+      query.category = { $regex: new RegExp(`^${category.trim()}$`, 'i') };
+    }
+
+    const andConditions = [];
+
+    // Search by Booking ID or Customer Name
+    if (search && search.trim()) {
+      const searchTrimmed = search.trim();
+      const matchingUsers = await User.find({
+        name: { $regex: searchTrimmed, $options: 'i' }
+      }).select('_id');
+      const userIds = matchingUsers.map((u) => u._id);
+
+      andConditions.push({
+        $or: [
+          { bookingId: { $regex: searchTrimmed, $options: 'i' } },
+          { customerId: { $in: userIds } }
+        ]
+      });
+    }
+
+    // Filter by Completion Date
+    if (date && date.trim()) {
+      const d = new Date(date.trim());
+      if (!isNaN(d.getTime())) {
+        const startOfDay = new Date(d);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(d);
+        endOfDay.setHours(23, 59, 59, 999);
+        andConditions.push({
+          $or: [
+            { completedAt: { $gte: startOfDay, $lte: endOfDay } },
+            { updatedAt: { $gte: startOfDay, $lte: endOfDay } }
+          ]
+        });
+      }
+    } else if (startDate || endDate) {
+      const start = startDate ? new Date(startDate) : new Date(0);
+      const end = endDate ? new Date(endDate) : new Date('2099-12-31');
+      if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+        end.setHours(23, 59, 59, 999);
+        andConditions.push({
+          $or: [
+            { completedAt: { $gte: start, $lte: end } },
+            { updatedAt: { $gte: start, $lte: end } }
+          ]
+        });
+      }
+    }
+
+    if (andConditions.length > 0) {
+      query.$and = andConditions;
+    }
+
+    // Sorting: newest first (default) vs oldest first
+    const sortOrder = sort === 'oldest' ? 1 : -1;
+    const sortQuery = { completedAt: sortOrder, updatedAt: sortOrder, createdAt: sortOrder };
+
+    // Counts
+    const total = await Booking.countDocuments(query);
+    const totalCompleted = await Booking.countDocuments({
+      workerId,
+      status: { $regex: /^completed$/i }
+    });
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, parseInt(limit, 10) || 10);
+    const totalPages = Math.ceil(total / limitNum) || 1;
+    const skip = (pageNum - 1) * limitNum;
+
+    const bookings = await Booking.find(query)
+      .populate('customerId', 'name phone email address profileImage')
+      .populate('serviceId', 'name price image category description')
+      .sort(sortQuery)
+      .skip(skip)
+      .limit(limitNum)
+      .lean();
+
+    // Populate ratings and feedback from Review model
+    const bookingIds = bookings.map((b) => b._id);
+    const reviews = await Review.find({ bookingId: { $in: bookingIds } }).lean();
+    const reviewMap = {};
+    reviews.forEach((r) => {
+      reviewMap[r.bookingId.toString()] = r;
+    });
+
+    // Populate worker complaints submitted for these bookings
+    const complaints = await Complaint.find({
+      bookingId: { $in: bookingIds },
+      submittedBy: workerId,
+      complaintType: 'worker'
+    }).sort({ createdAt: -1 }).lean();
+
+    const complaintsMap = {};
+    complaints.forEach((c) => {
+      const bKey = c.bookingId ? c.bookingId.toString() : '';
+      if (!complaintsMap[bKey]) complaintsMap[bKey] = [];
+      complaintsMap[bKey].push(c);
+    });
+
+    const enrichedServices = bookings.map((b) => {
+      const rev = reviewMap[b._id.toString()];
+      const bComplaints = complaintsMap[b._id.toString()] || [];
+      return {
+        ...b,
+        rating: rev ? rev.rating : null,
+        feedback: rev ? rev.comment : null,
+        review: rev || null,
+        complaints: bComplaints,
+        complaint: bComplaints[0] || null,
+        beforePhotos: b.problemPhotos || [],
+        afterPhotos:
+          b.completionPhotos && b.completionPhotos.length > 0
+            ? b.completionPhotos
+            : b.completedPhotos || []
+      };
+    });
+
+    res.json({
+      success: true,
+      services: enrichedServices,
+      total,
+      totalCompleted,
+      page: pageNum,
+      limit: limitNum,
+      totalPages
+    });
+  } catch (err) {
+    console.error('getWorkerServiceHistory error:', err);
+    res.status(500).json({ message: 'Failed to retrieve service history.' });
+  }
+}
+
+// 6g. Worker: Get Single Completed Service Details (GET /api/worker/service-history/:id)
+export async function getWorkerServiceHistoryDetail(req, res) {
+  try {
+    const workerId = req.user._id;
+    const { id } = req.params;
+
+    let query = {
+      workerId,
+      status: { $regex: /^completed$/i }
+    };
+
+    if (id.match(/^[0-9a-fA-F]{24}$/)) {
+      query._id = id;
+    } else {
+      query.bookingId = id;
+    }
+
+    const booking = await Booking.findOne(query)
+      .populate('customerId', 'name phone email address profileImage')
+      .populate('serviceId', 'name price image category description')
+      .lean();
+
+    if (!booking) {
+      return res.status(404).json({ message: 'Completed service record not found or access unauthorized.' });
+    }
+
+    const review = await Review.findOne({ bookingId: booking._id }).lean();
+    const complaints = await Complaint.find({
+      bookingId: booking._id,
+      submittedBy: workerId,
+      complaintType: 'worker'
+    }).sort({ createdAt: -1 }).lean();
+
+    const serviceDetail = {
+      ...booking,
+      rating: review ? review.rating : null,
+      feedback: review ? review.comment : null,
+      review: review || null,
+      complaints,
+      complaint: complaints[0] || null,
+      beforePhotos: booking.problemPhotos || [],
+      afterPhotos:
+        booking.completionPhotos && booking.completionPhotos.length > 0
+          ? booking.completionPhotos
+          : booking.completedPhotos || []
+    };
+
+    res.json({
+      success: true,
+      service: serviceDetail
+    });
+  } catch (err) {
+    console.error('getWorkerServiceHistoryDetail error:', err);
+    res.status(500).json({ message: 'Failed to retrieve service details.' });
   }
 }
 
@@ -557,13 +1025,13 @@ export async function updateJobStatus(req, res) {
     const { status, completionNotes = '' } = req.body;
     const workerId = req.user._id;
 
-    if (status === 'Completed') {
+    if (status === 'Completed' || status === 'completed') {
       return res.status(403).json({
         message: 'Workers cannot confirm job completion. Only the customer can confirm that the work has been completed.'
       });
     }
 
-    if (!['In Progress', 'Cancelled'].includes(status)) {
+    if (!['In Progress', 'in-progress', 'Cancelled', 'cancelled'].includes(status)) {
       return res.status(400).json({
         message: 'Invalid status update. Worker can only start (In Progress) or cancel a job.'
       });
@@ -644,7 +1112,7 @@ export async function toggleAvailability(req, res) {
 export async function getWorkerProfile(req, res) {
   try {
     const workerId = req.user._id;
-    const completedCount = await Booking.countDocuments({ workerId, status: 'Completed' });
+    const completedCount = await Booking.countDocuments({ workerId, status: { $regex: /^completed$/i } });
     const todayCount = await Booking.countDocuments({
       workerId,
       bookingDate: {
@@ -653,7 +1121,7 @@ export async function getWorkerProfile(req, res) {
       }
     });
 
-    const completedBookings = await Booking.find({ workerId, status: 'Completed' });
+    const completedBookings = await Booking.find({ workerId, status: { $regex: /^completed$/i } });
     const totalEarnings = completedBookings.reduce((sum, b) => sum + (b.totalAmount || 0), 0);
 
     const application = await WorkerApplication.findOne({ userId: workerId });

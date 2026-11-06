@@ -140,8 +140,8 @@ export async function postWorkerLocation(req, res) {
     }
     console.log('[GPS] Booking assignment verified');
 
-    // Verify booking status is Accepted or In Progress
-    if (!['Accepted', 'In Progress'].includes(booking.status)) {
+    // Verify booking status is Accepted or in-progress
+    if (!['Accepted', 'accepted', 'In Progress', 'in-progress', 'in_progress'].includes(booking.status)) {
       return res.status(400).json({
         message: `Tracking is only active for accepted or in-progress bookings. Current status: ${booking.status}`
       });
@@ -167,15 +167,18 @@ export async function postWorkerLocation(req, res) {
     );
 
     // Cache on booking for instant retrieval
-    booking.workerLocation = {
-      latitude: numLat,
-      longitude: numLng,
-      accuracy: Number(accuracy) || 0,
-      heading: Number(heading) || 0,
-      speed: Number(speed) || 0,
-      lastUpdated: now
-    };
-    await booking.save();
+    await Booking.findByIdAndUpdate(booking._id, {
+      $set: {
+        workerLocation: {
+          latitude: numLat,
+          longitude: numLng,
+          accuracy: Number(accuracy) || 0,
+          heading: Number(heading) || 0,
+          speed: Number(speed) || 0,
+          lastUpdated: now
+        }
+      }
+    });
     console.log('[GPS] Coordinates saved to MongoDB');
 
     const io = req.app.get('io');
@@ -222,9 +225,9 @@ export async function postWorkerLocation(req, res) {
 // 3. Admin: Get All Active Workers on Map
 export async function getAdminLiveWorkers(req, res) {
   try {
-    // Active bookings that are Accepted or In Progress
+    // Active bookings that are Accepted or in-progress
     const activeBookings = await Booking.find({
-      status: { $in: ['Accepted', 'In Progress', 'Assigned'] },
+      status: { $in: ['Accepted', 'accepted', 'In Progress', 'in-progress', 'in_progress', 'Assigned', 'assigned'] },
       workerId: { $ne: null }
     })
       .populate('workerId', 'name phone profileImage approvedCategories')

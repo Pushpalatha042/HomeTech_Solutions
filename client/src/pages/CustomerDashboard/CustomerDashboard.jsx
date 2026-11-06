@@ -27,12 +27,13 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useSocket } from '../../context/SocketContext';
+import { useDashboard } from '../../context/DashboardContext';
 import DashboardSidebar from '../../components/sidebar/DashboardSidebar';
 import StatCard from '../../components/common/StatCard';
 import Modal from '../../components/common/Modal';
-import WorkerApplicationModal from '../../components/common/WorkerApplicationModal';
 import LiveMap from '../../components/tracking/LiveMap';
 import api from '../../api';
+import { getServiceImage, homeMaintenanceImg } from '../../assets/images';
 
 export default function CustomerDashboard() {
   const { user, notify, updateUser, switchRole } = useAuth();
@@ -40,9 +41,17 @@ export default function CustomerDashboard() {
   const navigate = useNavigate();
   const location = useLocation();
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [bookings, setBookings] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [isWorkerModalOpen, setIsWorkerModalOpen] = useState(false);
+
+  // Consume persistent DashboardContext
+  const {
+    customerBookings: bookings,
+    customerLoading: loading,
+    customerError,
+    customerInitialized,
+    fetchCustomerBookings,
+    activeArrivalOtps,
+    resendArrivalOtp
+  } = useDashboard();
 
   // Live Worker Location state for active jobs
   const [liveWorkerLoc, setLiveWorkerLoc] = useState(null);
@@ -58,7 +67,7 @@ export default function CustomerDashboard() {
   const [ratingComment, setRatingComment] = useState('');
   const [submittingRating, setSubmittingRating] = useState(false);
 
-  // Upload Completed Work Photos Modal state (Part 4)
+  // Upload Completed Work Photos Modal state
   const [afterPhotosModalBooking, setAfterPhotosModalBooking] = useState(null);
   const [afterPhotos, setAfterPhotos] = useState([]);
   const [afterPhotoError, setAfterPhotoError] = useState('');
@@ -83,17 +92,50 @@ export default function CustomerDashboard() {
     }
   }, [location.state]);
 
+  // Sync tab with URL search parameter ?tab=
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const tabParam = params.get('tab');
+    if (tabParam && ['dashboard', 'ongoing', 'profile', 'addresses'].includes(tabParam)) {
+      setActiveTab(tabParam);
+    }
+  }, [location.search]);
+
+  // Refresh profile details directly from database record
+  useEffect(() => {
+    api.get('/auth/me')
+      .then(({ data }) => {
+        if (data) {
+          updateUser(data);
+          setEditName(data.name || '');
+          setEditAddress(data.address || '');
+        }
+      })
+      .catch((err) => console.warn('Could not refresh user profile:', err.message));
+  }, []);
+
   const fetchBookings = () => {
-    setLoading(true);
-    api.get('/bookings/my')
-      .then(({ data }) => setBookings(data))
-      .catch((err) => console.error(err))
-      .finally(() => setLoading(false));
+    fetchCustomerBookings(false);
   };
 
   useEffect(() => {
     fetchBookings();
   }, []);
+
+  const handleCancelProfileEdit = () => {
+    setEditName(user?.name || '');
+    setEditAddress(user?.address || '');
+    setActiveTab('dashboard');
+  };
+
+  const handleResendOtp = async (bookingId) => {
+    try {
+      const res = await resendArrivalOtp(bookingId);
+      notify(res?.message || 'New arrival OTP generated!', 'success');
+    } catch (err) {
+      notify(err.response?.data?.message || 'Failed to resend OTP.', 'danger');
+    }
+  };
 
   // Top-level Socket.IO listener: updates bookings in real-time when status changes
   useEffect(() => {
@@ -117,22 +159,56 @@ export default function CustomerDashboard() {
     }
   }, [user]);
 
+  // Status checking helpers
+  const isInProgress = (status) => {
+    if (!status) return false;
+    const s = String(status).trim().toLowerCase();
+    return s === 'in-progress' || s === 'in progress' || s === 'in_progress';
+  };
+
+  const isCompleted = (status) => {
+    if (!status) return false;
+    return String(status).trim().toLowerCase() === 'completed';
+  };
+
+  const isAcceptedOrAssigned = (status) => {
+    if (!status) return false;
+    const s = String(status).trim().toLowerCase();
+    return s === 'accepted' || s === 'assigned';
+  };
+
+  const isAwaitingVerification = (status) => {
+    if (!status) return false;
+    const s = String(status).trim().toLowerCase();
+    return s === 'awaiting arrival verification' || s === 'awaiting-arrival-verification';
+  };
+
+  const isUpcoming = (status) => {
+    if (!status) return false;
+    const s = String(status).trim().toLowerCase();
+    return [
+      'pending', 'confirmed', 'assigned', 'accepted',
+      'awaiting arrival verification', 'awaiting-arrival-verification',
+      'in progress', 'in-progress', 'in_progress'
+    ].includes(s);
+  };
+
   // Compute stats
   const totalBookings = bookings.length;
-  const upcomingBookings = bookings.filter((b) =>
-    ['Pending', 'Confirmed', 'Assigned', 'Accepted', 'In Progress'].includes(b.status)
-  );
-  const completedBookings = bookings.filter((b) => b.status === 'Completed');
+  const upcomingBookings = bookings.filter((b) => isUpcoming(b.status));
+  // Identify next upcoming booking
+  const nextBooking = upcomingBookings[0] || null;
+  const awaitingOtpBooking = (nextBooking && isAwaitingVerification(nextBooking.status))
+    ? nextBooking
+    : bookings.find((b) => isAwaitingVerification(b.status));
+  const completedBookings = bookings.filter((b) => isCompleted(b.status));
   const totalSpent = bookings
     .filter((b) => b.paymentStatus === 'Paid')
     .reduce((sum, b) => sum + (b.totalAmount || 0), 0);
 
-  // Identify next upcoming booking
-  const nextBooking = upcomingBookings[0] || null;
-
   // Real-time tracking effect for next booking if active
   useEffect(() => {
-    if (!nextBooking || !['Accepted', 'In Progress'].includes(nextBooking.status)) {
+    if (!nextBooking || !(isAcceptedOrAssigned(nextBooking.status) || isAwaitingVerification(nextBooking.status) || isInProgress(nextBooking.status))) {
       setLiveWorkerLoc(null);
       return;
     }
@@ -208,22 +284,13 @@ export default function CustomerDashboard() {
         res = await api.put(`/bookings/${bookingId}/complete`);
       }
 
-      // Update React state immediately
-      const updated = res?.data?.booking;
-      setBookings((prev) =>
-        prev.map((b) => {
-          if (b._id === bookingId || b.bookingId === completionModalBooking.bookingId) {
-            return updated ? { ...b, ...updated, status: 'Completed', paymentStatus: 'Paid' } : { ...b, status: 'Completed', paymentStatus: 'Paid' };
-          }
-          return b;
-        })
-      );
+      // Refresh persistent bookings
+      fetchBookings();
 
       notify(res?.data?.message || 'Work completion confirmed successfully! Thank you.', 'success');
       const justCompleted = completionModalBooking;
       setCompletionModalBooking(null);
       setCompletionError('');
-      fetchBookings();
 
       // Automatically open Rate Service prompt for the completed booking
       setRateModalBooking(justCompleted);
@@ -483,7 +550,7 @@ export default function CustomerDashboard() {
 
             {/* Quick Profile Actions */}
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-              {isWorkerApproved ? (
+              {isWorkerApproved && (
                 <button
                   className="btn btn-yellow btn-small"
                   onClick={() => handleRoleSwitch('worker')}
@@ -491,7 +558,8 @@ export default function CustomerDashboard() {
                 >
                   <RefreshCw size={14} /> Switch to Worker Dashboard
                 </button>
-              ) : user?.workerStatus === 'pending' ? (
+              )}
+              {user?.workerStatus === 'pending' && (
                 <button
                   className="btn btn-outline btn-small"
                   disabled
@@ -499,29 +567,19 @@ export default function CustomerDashboard() {
                 >
                   <Clock size={14} /> Worker App Pending Review
                 </button>
-              ) : user?.workerStatus === 'rejected' ? (
-                <button
-                  className="btn btn-outline btn-small"
-                  onClick={() => setIsWorkerModalOpen(true)}
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                >
-                  <Briefcase size={14} /> Re-apply as Worker
-                </button>
-              ) : (
-                <button
-                  className="btn btn-yellow btn-small"
-                  onClick={() => setIsWorkerModalOpen(true)}
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                >
-                  <Briefcase size={14} /> Join as a Worker
-                </button>
               )}
 
+              {/* Functional Edit Profile Button */}
               <button
                 className={`btn ${activeTab === 'profile' ? 'btn-navy' : 'btn-outline'} btn-small`}
-                onClick={() => setActiveTab(activeTab === 'profile' ? 'dashboard' : 'profile')}
+                onClick={() => {
+                  setEditName(user?.name || '');
+                  setEditAddress(user?.address || '');
+                  setActiveTab(activeTab === 'profile' ? 'dashboard' : 'profile');
+                }}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
               >
-                <Settings size={14} /> {activeTab === 'profile' ? 'View Dashboard' : 'Profile Settings'}
+                <User size={14} /> {activeTab === 'profile' ? 'View Dashboard' : 'Edit Profile'}
               </button>
             </div>
           </div>
@@ -543,8 +601,14 @@ export default function CustomerDashboard() {
             >
               Dashboard Overview
             </button>
+            <button
+              className={`btn btn-small ${activeTab === 'ongoing' ? 'btn-navy' : 'btn-outline'}`}
+              onClick={() => setActiveTab('ongoing')}
+            >
+              <Clock size={14} /> Ongoing Jobs ({upcomingBookings.length})
+            </button>
             <Link to="/customer/bookings" className="btn btn-outline btn-small">
-              <CalendarDays size={14} /> My Bookings ({totalBookings})
+              <CalendarDays size={14} /> Booking History ({totalBookings})
             </Link>
             <Link to="/customer/payments" className="btn btn-outline btn-small">
               <CreditCard size={14} /> Payment History (₹{totalSpent.toLocaleString('en-IN')})
@@ -554,6 +618,16 @@ export default function CustomerDashboard() {
               onClick={() => setActiveTab('addresses')}
             >
               <MapPin size={14} /> Saved Addresses
+            </button>
+            <button
+              className={`btn btn-small ${activeTab === 'profile' ? 'btn-navy' : 'btn-outline'}`}
+              onClick={() => {
+                setEditName(user?.name || '');
+                setEditAddress(user?.address || '');
+                setActiveTab('profile');
+              }}
+            >
+              <Settings size={14} /> Profile Settings
             </button>
           </div>
         </div>
@@ -599,6 +673,76 @@ export default function CustomerDashboard() {
               />
             </div>
 
+            {/* Arrival OTP Notification for Customer */}
+            {awaitingOtpBooking && (
+              <div
+                className="card"
+                style={{
+                  marginBottom: '24px',
+                  padding: '20px 24px',
+                  backgroundColor: '#f0f9ff',
+                  border: '2px dashed #0284c7',
+                  borderRadius: 'var(--radius-md)'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                    <div
+                      style={{
+                        width: '44px',
+                        height: '44px',
+                        borderRadius: '50%',
+                        backgroundColor: '#e0f2fe',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#0284c7',
+                        flexShrink: 0
+                      }}
+                    >
+                      <ShieldCheck size={26} />
+                    </div>
+                    <div>
+                      <h4 style={{ color: '#0369a1', fontSize: '16px', fontWeight: 700, margin: 0 }}>
+                        Worker Has Arrived! Service Start Verification Code
+                      </h4>
+                      <p style={{ color: '#075985', fontSize: '13px', margin: '3px 0 0' }}>
+                        Please share this 6-digit verification code with your service professional upon arrival to start work.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div
+                      className="arrival-otp-display"
+                      data-testid="arrival-otp-code"
+                      style={{
+                        fontSize: '28px',
+                        fontWeight: 800,
+                        letterSpacing: '6px',
+                        color: '#0369a1',
+                        backgroundColor: '#ffffff',
+                        padding: '8px 20px',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid #bae6fd',
+                        boxShadow: 'var(--shadow-sm)'
+                      }}
+                    >
+                      {activeArrivalOtps[awaitingOtpBooking._id]?.otp || '••••••'}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-small"
+                      onClick={() => handleResendOtp(awaitingOtpBooking._id)}
+                      style={{ fontSize: '12px', borderColor: '#0284c7', color: '#0284c7' }}
+                    >
+                      Resend Code
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Upcoming Booking Featured Card (Prototype Page 5) */}
             {nextBooking ? (
               <section className="card" style={{ marginBottom: '32px', padding: '24px' }}>
@@ -606,18 +750,18 @@ export default function CustomerDashboard() {
                   <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--primary-navy)' }}>
                     Upcoming Booking
                   </h3>
-                  <span className={`badge badge-${nextBooking.status.toLowerCase().replace(/\s+/g, '')}`}>
-                    {nextBooking.status}
+                  <span className={`badge badge-${String(nextBooking.status).toLowerCase().replace(/[\s_]+/g, '')}`}>
+                    {isInProgress(nextBooking.status) ? 'Work In Progress' : nextBooking.status}
                   </span>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr auto', gap: '20px', alignItems: 'center' }}>
                   <img
-                    src={nextBooking.serviceId?.image || '/assets/images/plumbing.jpg'}
+                    src={getServiceImage(nextBooking.serviceId || nextBooking)}
                     alt="Service"
                     onError={(e) => {
                       e.target.onerror = null;
-                      e.target.src = '/assets/images/home-maintenance.jpg';
+                      e.target.src = homeMaintenanceImg;
                     }}
                     style={{
                       width: '120px',
@@ -643,7 +787,7 @@ export default function CustomerDashboard() {
                       </p>
                     )}
 
-                    {/* Automatic Live GPS Display in Customer Dashboard (Requirement 1 & 2) */}
+                    {/* Automatic Live GPS Display in Customer Dashboard */}
                     {liveWorkerLoc && (
                       <div
                         style={{
@@ -679,18 +823,32 @@ export default function CustomerDashboard() {
                   </div>
 
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    {/* CONFIRM COMPLETION BUTTON (Requirement 4) */}
-                    {nextBooking.status === 'In Progress' && (
+                    {/* COMPLETE SERVICE BUTTON (Requirement 4: For in-progress bookings) */}
+                    {isInProgress(nextBooking.status) && (
                       <button
                         className="btn btn-success"
+                        data-testid="complete-service-btn"
                         onClick={() => setCompletionModalBooking(nextBooking)}
                         style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700 }}
                       >
-                        <CheckCircle2 size={16} /> Confirm Completion
+                        <CheckCircle2 size={16} /> Complete Service
                       </button>
                     )}
 
-                    {['Assigned', 'Accepted', 'In Progress'].includes(nextBooking.status) && (
+                    {/* RAISE A COMPLAINT BUTTON (Requirement 4: For in-progress or accepted bookings) */}
+                    {(isInProgress(nextBooking.status) || isAcceptedOrAssigned(nextBooking.status)) && (
+                      <button
+                        className="btn btn-outline"
+                        data-testid="raise-complaint-btn"
+                        onClick={() => setComplaintModalBooking(nextBooking)}
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <AlertCircle size={16} /> Raise a Complaint
+                      </button>
+                    )}
+
+                    {/* TRACK WORKER BUTTON: Only visible during Accepted / Assigned (Removed during In-Progress) */}
+                    {isAcceptedOrAssigned(nextBooking.status) && !isInProgress(nextBooking.status) && (
                       <Link
                         to={`/tracking/${nextBooking._id}`}
                         className="btn btn-yellow"
@@ -789,11 +947,11 @@ export default function CustomerDashboard() {
                           <td>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                               <img
-                                src={b.serviceId?.image || '/assets/images/plumbing.jpg'}
+                                src={getServiceImage(b.serviceId || b)}
                                 alt="Service"
                                 onError={(e) => {
                                   e.target.onerror = null;
-                                  e.target.src = '/assets/images/home-maintenance.jpg';
+                                  e.target.src = homeMaintenanceImg;
                                 }}
                                 style={{
                                   width: '40px',
@@ -821,7 +979,7 @@ export default function CustomerDashboard() {
                             </div>
                           </td>
                           <td>
-                            <span className={`badge badge-${b.status.toLowerCase().replace(/\s+/g, '')}`}>
+                            <span className={`badge badge-${String(b.status).toLowerCase().replace(/[\s_]+/g, '')}`}>
                               {b.status}
                             </span>
                           </td>
@@ -829,22 +987,33 @@ export default function CustomerDashboard() {
                             <strong>₹{Number(b.totalAmount).toLocaleString('en-IN')}</strong>
                           </td>
                           <td>
-                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                              {b.status === 'In Progress' && (
-                                <button
-                                  className="btn btn-success btn-small"
-                                  onClick={() => setCompletionModalBooking(b)}
-                                  style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 700 }}
-                                >
-                                  <CheckCircle2 size={13} /> Complete
-                                </button>
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                              {isInProgress(b.status) && (
+                                <>
+                                  <button
+                                    className="btn btn-success btn-small"
+                                    data-testid="complete-service-btn"
+                                    onClick={() => setCompletionModalBooking(b)}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 700 }}
+                                  >
+                                    <CheckCircle2 size={13} /> Complete Service
+                                  </button>
+                                  <button
+                                    className="btn btn-outline btn-small"
+                                    data-testid="raise-complaint-btn"
+                                    onClick={() => setComplaintModalBooking(b)}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+                                  >
+                                    <AlertCircle size={13} /> Raise a Complaint
+                                  </button>
+                                </>
                               )}
-                              {['Assigned', 'Accepted', 'In Progress'].includes(b.status) && (
+                              {isAcceptedOrAssigned(b.status) && !isInProgress(b.status) && (
                                 <Link to={`/tracking/${b._id}`} className="btn btn-yellow btn-small">
                                   Track
                                 </Link>
                               )}
-                              {b.status === 'Completed' && (
+                              {isCompleted(b.status) && (
                                 <>
                                   <button
                                     className="btn btn-navy btn-small"
@@ -864,6 +1033,7 @@ export default function CustomerDashboard() {
                                   </button>
                                   <button
                                     className="btn btn-outline btn-small"
+                                    data-testid="raise-complaint-btn"
                                     onClick={() => setComplaintModalBooking(b)}
                                     style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '11px', padding: '4px 8px' }}
                                     title="Raise Complaint"
@@ -887,6 +1057,188 @@ export default function CustomerDashboard() {
               )}
             </section>
           </>
+        )}
+
+        {/* TAB: ONGOING JOBS */}
+        {activeTab === 'ongoing' && (
+          <section className="card" style={{ padding: '24px' }}>
+            <div className="flex-between" style={{ marginBottom: '20px' }}>
+              <div>
+                <h3 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--primary-navy)' }}>
+                  Ongoing & Active Jobs ({upcomingBookings.length})
+                </h3>
+                <p style={{ color: 'var(--secondary-text)', fontSize: '14px', marginTop: '2px' }}>
+                  Track your scheduled visits, live worker locations, and confirm completion once work is finished.
+                </p>
+              </div>
+              <Link to="/customer/bookings" className="btn btn-outline btn-small">
+                View All Booking History
+              </Link>
+            </div>
+
+            {upcomingBookings.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 20px' }}>
+                <img
+                  src="/assets/images/home-maintenance.jpg"
+                  alt="No Ongoing Jobs"
+                  style={{ width: '120px', height: '80px', objectFit: 'cover', borderRadius: 'var(--radius-md)', opacity: 0.85, margin: '0 auto 16px' }}
+                />
+                <h4>No Ongoing Jobs</h4>
+                <p style={{ color: 'var(--secondary-text)', fontSize: '14px', maxWidth: '400px', margin: '8px auto 16px' }}>
+                  You currently have no active or in-progress service requests. Need help with repairs or maintenance?
+                </p>
+                <Link to="/services" className="btn btn-navy btn-small">
+                  Book a Service
+                </Link>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                {upcomingBookings.map((job) => (
+                  <div
+                    key={job._id}
+                    style={{
+                      border: '1px solid var(--border-color)',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '20px',
+                      background: 'var(--white)'
+                    }}
+                  >
+                    <div className="flex-between" style={{ marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <img
+                          src={getServiceImage(job.serviceId || job)}
+                          alt={job.serviceId?.name || job.category}
+                          onError={(e) => {
+                            e.target.onerror = null;
+                            e.target.src = homeMaintenanceImg;
+                          }}
+                          style={{ width: '56px', height: '56px', borderRadius: 'var(--radius-sm)', objectFit: 'cover' }}
+                        />
+                        <div>
+                          <h4 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--primary-navy)' }}>
+                            {job.serviceId?.name || job.category}
+                          </h4>
+                          <div style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>
+                            Booking ID: <strong>{job.bookingId}</strong> • Total: <strong>₹{Number(job.totalAmount).toLocaleString('en-IN')}</strong>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span className={`badge badge-${job.status.toLowerCase().replace(/\s+/g, '')}`}>
+                          {job.status === 'In Progress' ? 'Work In Progress' : job.status}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', fontSize: '13px', color: 'var(--secondary-text)', background: 'var(--bg-color)', padding: '12px', borderRadius: 'var(--radius-sm)', marginBottom: '14px' }}>
+                      <div>
+                        <strong style={{ color: 'var(--primary-navy)' }}>Scheduled:</strong>{' '}
+                        {new Date(job.bookingDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} at {job.bookingTime}
+                      </div>
+                      <div>
+                        <strong style={{ color: 'var(--primary-navy)' }}>Service Address:</strong>{' '}
+                        {job.address}
+                      </div>
+                      {job.workerId && (
+                        <div>
+                          <strong style={{ color: 'var(--primary-navy)' }}>Professional:</strong>{' '}
+                          {job.workerId.name} ({job.workerId.phone})
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Arrival OTP Display if awaiting verification */}
+                    {job.status === 'Awaiting Arrival Verification' && (
+                      <div
+                        style={{
+                          backgroundColor: '#f0f9ff',
+                          border: '2px dashed #0284c7',
+                          padding: '16px',
+                          borderRadius: 'var(--radius-md)',
+                          marginBottom: '14px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: '12px'
+                        }}
+                      >
+                        <div>
+                          <strong style={{ color: '#0369a1', fontSize: '14px' }}>
+                            Worker Has Arrived! Share Arrival OTP
+                          </strong>
+                          <p style={{ color: '#075985', fontSize: '12px', marginTop: '2px' }}>
+                            Provide this 6-digit verification code to the professional to start work.
+                          </p>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <span
+                            style={{
+                              fontSize: '24px',
+                              fontWeight: 800,
+                              letterSpacing: '4px',
+                              color: '#0369a1',
+                              background: '#fff',
+                              padding: '6px 16px',
+                              borderRadius: 'var(--radius-sm)',
+                              border: '1px solid #bae6fd'
+                            }}
+                          >
+                            {activeArrivalOtps[job._id]?.otp || '••••••'}
+                          </span>
+                          <button
+                            type="button"
+                            className="btn btn-outline btn-small"
+                            onClick={() => handleResendOtp(job._id)}
+                            style={{ fontSize: '12px' }}
+                          >
+                            Resend Code
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Action buttons */}
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      {isInProgress(job.status) && (
+                        <button
+                          className="btn btn-success btn-small"
+                          data-testid="complete-service-btn"
+                          onClick={() => setCompletionModalBooking(job)}
+                          style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700 }}
+                        >
+                          <CheckCircle2 size={15} /> Complete Service
+                        </button>
+                      )}
+
+                      {(isInProgress(job.status) || isAcceptedOrAssigned(job.status)) && (
+                        <button
+                          className="btn btn-outline btn-small"
+                          data-testid="raise-complaint-btn"
+                          onClick={() => setComplaintModalBooking(job)}
+                          style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          <AlertCircle size={15} /> Raise a Complaint
+                        </button>
+                      )}
+
+                      {/* TRACK WORKER BUTTON: Only visible during Accepted / Assigned (Removed during In-Progress) */}
+                      {isAcceptedOrAssigned(job.status) && !isInProgress(job.status) && (
+                        <Link
+                          to={`/tracking/${job._id}`}
+                          className="btn btn-yellow btn-small"
+                          style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          <MapPinned size={15} /> Track Worker
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         )}
 
         {/* TAB 2: PROFILE SETTINGS */}
@@ -985,7 +1337,7 @@ export default function CustomerDashboard() {
                 <button
                   type="button"
                   className="btn btn-outline"
-                  onClick={() => setActiveTab('dashboard')}
+                  onClick={handleCancelProfileEdit}
                 >
                   Cancel
                 </button>
@@ -1121,6 +1473,7 @@ export default function CustomerDashboard() {
               <button
                 type="button"
                 className="btn btn-success"
+                data-testid="confirm-completion-btn"
                 onClick={handleConfirmCompletion}
                 disabled={confirmingCompletion}
                 style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700 }}
@@ -1344,12 +1697,6 @@ export default function CustomerDashboard() {
           </form>
         </Modal>
       )}
-
-      {/* Join as Worker Modal */}
-      <WorkerApplicationModal
-        isOpen={isWorkerModalOpen}
-        onClose={() => setIsWorkerModalOpen(false)}
-      />
     </div>
   );
 }

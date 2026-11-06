@@ -2,6 +2,7 @@
   "name": "hometech-solutions",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "install:all": "npm install --prefix server && npm install --prefix client",
     "seed": "node server/seed.js",
@@ -11,6 +12,7 @@
     "dev": "concurrently \"npm run server\" \"npm run client\""
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "puppeteer-core": "^25.16.0"
   }
 }

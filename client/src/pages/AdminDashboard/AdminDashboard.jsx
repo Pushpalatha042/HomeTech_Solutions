@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Users,
   Briefcase,
@@ -49,13 +50,22 @@ const COLORS = ['#071D49', '#FFC928', '#198754', '#0284C7', '#DC3545', '#8b5cf6'
 
 export default function AdminDashboard() {
   const { notify } = useAuth();
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const location = useLocation();
+  const searchTab = new URLSearchParams(location.search).get('tab');
+  const [activeTab, setActiveTab] = useState(searchTab || 'dashboard');
+
+  useEffect(() => {
+    if (searchTab) {
+      setActiveTab(searchTab);
+    }
+  }, [searchTab]);
   const [stats, setStats] = useState(null);
   const [recentBookings, setRecentBookings] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Tab Data States
   const [usersList, setUsersList] = useState([]);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
   const [applications, setApplications] = useState([]);
   const [workersList, setWorkersList] = useState([]);
   const [servicesList, setServicesList] = useState([]);
@@ -69,10 +79,21 @@ export default function AdminDashboard() {
   // Complaints Management State (Requirement 8)
   const [complaintsList, setComplaintsList] = useState([]);
   const [complaintFilter, setComplaintFilter] = useState('all'); // 'all' | 'customer' | 'worker'
+  const [complaintSearch, setComplaintSearch] = useState('');
+  const [complaintCategoryFilter, setComplaintCategoryFilter] = useState('all');
+  const [complaintStatusFilter, setComplaintStatusFilter] = useState('all');
   const [investigateComplaint, setInvestigateComplaint] = useState(null);
   const [investigateStatus, setInvestigateStatus] = useState('Submitted');
   const [investigateNotes, setInvestigateNotes] = useState('');
   const [updatingComplaint, setUpdatingComplaint] = useState(false);
+
+  // Additional Categories Applications State (Feature 2)
+  const [additionalApplications, setAdditionalApplications] = useState([]);
+  const [appSectionTab, setAppSectionTab] = useState('onboarding'); // 'onboarding' | 'additional'
+  const [reviewAdditionalModalApp, setReviewAdditionalModalApp] = useState(null);
+  const [reviewApprovedCats, setReviewApprovedCats] = useState([]);
+  const [reviewAdminNotes, setReviewAdminNotes] = useState('');
+  const [reviewingAdditional, setReviewingAdditional] = useState(false);
 
   // Modals
   const [approveModalApp, setApproveModalApp] = useState(null);
@@ -113,6 +134,7 @@ export default function AdminDashboard() {
       api.get('/admin/users').then(({ data }) => setUsersList(data));
     } else if (activeTab === 'applications') {
       api.get('/worker-applications').then(({ data }) => setApplications(data));
+      api.get('/admin/worker-applications/additional').then(({ data }) => setAdditionalApplications(data)).catch(() => {});
     } else if (activeTab === 'workers') {
       api.get('/admin/workers').then(({ data }) => setWorkersList(data));
     } else if (activeTab === 'services') {
@@ -182,6 +204,45 @@ export default function AdminDashboard() {
       fetchOverview();
     } catch (err) {
       notify('Failed to reject application.', 'danger');
+    }
+  };
+
+  // Additional Categories Application Handlers (Feature 2)
+  const handleOpenReviewAdditionalModal = (app) => {
+    setReviewAdditionalModalApp(app);
+    setReviewApprovedCats(app.requestedCategories || []);
+    setReviewAdminNotes(app.adminNotes || '');
+  };
+
+  const handleReviewAdditional = async (action) => {
+    if (!reviewAdditionalModalApp) return;
+    setReviewingAdditional(true);
+    try {
+      const payload = {
+        action,
+        approvedCategories: action === 'approve' ? reviewApprovedCats : [],
+        rejectedCategories:
+          action === 'reject'
+            ? reviewAdditionalModalApp.requestedCategories || []
+            : (reviewAdditionalModalApp.requestedCategories || []).filter(
+                (c) => !reviewApprovedCats.includes(c)
+              ),
+        adminNotes: reviewAdminNotes
+      };
+      const { data } = await api.put(
+        `/admin/worker-applications/${reviewAdditionalModalApp._id}/review-additional`,
+        payload
+      );
+      notify(data.message, action === 'approve' ? 'success' : 'info');
+      setReviewAdditionalModalApp(null);
+      // Refresh additional applications & workers
+      api.get('/admin/worker-applications/additional').then(({ data }) => setAdditionalApplications(data)).catch(() => {});
+      api.get('/admin/workers').then(({ data }) => setWorkersList(data)).catch(() => {});
+      fetchOverview();
+    } catch (err) {
+      notify(err.response?.data?.message || 'Failed to review additional application.', 'danger');
+    } finally {
+      setReviewingAdditional(false);
     }
   };
 
@@ -380,9 +441,25 @@ export default function AdminDashboard() {
         {/* 2. USERS TAB */}
         {activeTab === 'users' && (
           <section className="card" style={{ padding: '24px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--primary-navy)', marginBottom: '18px' }}>
-              Platform Users ({usersList.length})
-            </h3>
+            <div className="flex-between" style={{ marginBottom: '18px', flexWrap: 'wrap', gap: '14px' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--primary-navy)', margin: 0 }}>
+                Platform Users ({usersList.length})
+              </h3>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Search users by name, email, or phone..."
+                  value={userSearchQuery}
+                  onChange={(e) => {
+                    const q = e.target.value;
+                    setUserSearchQuery(q);
+                    api.get(`/admin/users?search=${encodeURIComponent(q)}`).then(({ data }) => setUsersList(data));
+                  }}
+                  style={{ width: '280px', padding: '8px 12px' }}
+                />
+              </div>
+            </div>
             <div className="table-responsive">
               <table className="data-table">
                 <thead>
@@ -439,78 +516,230 @@ export default function AdminDashboard() {
         {/* 3. WORKER APPLICATIONS TAB */}
         {activeTab === 'applications' && (
           <section className="card" style={{ padding: '24px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--primary-navy)', marginBottom: '18px' }}>
-              Worker Onboarding Applications ({applications.length})
-            </h3>
-            {applications.length === 0 ? (
-              <p style={{ textAlign: 'center', padding: '30px', color: 'var(--secondary-text)' }}>
-                No worker applications found.
-              </p>
-            ) : (
-              <div className="table-responsive">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Applicant</th>
-                      <th>Applied Categories</th>
-                      <th>Experience</th>
-                      <th>Location</th>
-                      <th>Status</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {applications.map((app) => (
-                      <tr key={app._id}>
-                        <td>
-                          <strong>{app.fullName}</strong>
-                          <div style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>
-                            {app.email} • +91 {app.phone}
-                          </div>
-                          <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-                            "{app.professionalDescription}"
-                          </div>
-                        </td>
-                        <td>
-                          {(app.selectedCategories || []).map((cat) => (
-                            <span key={cat} className="badge badge-accepted" style={{ marginRight: '4px', marginBottom: '2px' }}>
-                              {cat}
-                            </span>
-                          ))}
-                        </td>
-                        <td>{app.experience} Years</td>
-                        <td style={{ fontSize: '13px' }}>{app.serviceLocation}</td>
-                        <td>
-                          <span className={`badge badge-${app.applicationStatus}`}>
-                            {app.applicationStatus}
-                          </span>
-                        </td>
-                        <td>
-                          {app.applicationStatus === 'pending' ? (
-                            <div style={{ display: 'flex', gap: '6px' }}>
-                              <button
-                                className="btn btn-success btn-small"
-                                onClick={() => openApproveModal(app)}
-                              >
-                                Approve
-                              </button>
-                              <button
-                                className="btn btn-danger btn-small"
-                                onClick={() => handleRejectApplication(app._id)}
-                              >
-                                Reject
-                              </button>
-                            </div>
-                          ) : (
-                            <span style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>
-                              Reviewed
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <div className="flex-between" style={{ marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--primary-navy)' }}>
+                  Worker Applications & Category Expansions
+                </h3>
+                <p style={{ fontSize: '13px', color: 'var(--secondary-text)' }}>
+                  Review initial onboarding requests and requests from existing workers to expand into new trade categories.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  data-testid="tab-onboarding-applications"
+                  className={`btn ${appSectionTab === 'onboarding' ? 'btn-navy' : 'btn-outline'} btn-small`}
+                  onClick={() => setAppSectionTab('onboarding')}
+                >
+                  Onboarding Applications ({applications.length})
+                </button>
+                <button
+                  type="button"
+                  data-testid="tab-additional-applications"
+                  className={`btn ${appSectionTab === 'additional' ? 'btn-navy' : 'btn-outline'} btn-small`}
+                  onClick={() => {
+                    setAppSectionTab('additional');
+                    api.get('/admin/worker-applications/additional').then(({ data }) => setAdditionalApplications(data)).catch(() => {});
+                  }}
+                >
+                  Additional Service Applications ({additionalApplications.length})
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline btn-small"
+                  onClick={() => {
+                    api.get('/worker-applications').then(({ data }) => setApplications(data));
+                    api.get('/admin/worker-applications/additional').then(({ data }) => setAdditionalApplications(data)).catch(() => {});
+                  }}
+                  title="Refresh Applications"
+                >
+                  <RefreshCw size={13} />
+                </button>
+              </div>
+            </div>
+
+            {/* Sub-tab 1: Onboarding Applications */}
+            {appSectionTab === 'onboarding' && (
+              <div>
+                {applications.length === 0 ? (
+                  <p style={{ textAlign: 'center', padding: '30px', color: 'var(--secondary-text)' }}>
+                    No worker applications found.
+                  </p>
+                ) : (
+                  <div className="table-responsive">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Applicant</th>
+                          <th>Applied Categories</th>
+                          <th>Experience</th>
+                          <th>Location</th>
+                          <th>Status</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {applications.map((app) => (
+                          <tr key={app._id}>
+                            <td>
+                              <strong>{app.fullName}</strong>
+                              <div style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>
+                                {app.email} • +91 {app.phone}
+                              </div>
+                              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                                "{app.professionalDescription}"
+                              </div>
+                            </td>
+                            <td>
+                              {(app.selectedCategories || []).map((cat) => (
+                                <span key={cat} className="badge badge-accepted" style={{ marginRight: '4px', marginBottom: '2px' }}>
+                                  {cat}
+                                </span>
+                              ))}
+                            </td>
+                            <td>{app.experience} Years</td>
+                            <td style={{ fontSize: '13px' }}>{app.serviceLocation}</td>
+                            <td>
+                              <span className={`badge badge-${app.applicationStatus}`}>
+                                {app.applicationStatus}
+                              </span>
+                            </td>
+                            <td>
+                              {app.applicationStatus === 'pending' ? (
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  <button
+                                    className="btn btn-success btn-small"
+                                    onClick={() => openApproveModal(app)}
+                                  >
+                                    Approve
+                                  </button>
+                                  <button
+                                    className="btn btn-danger btn-small"
+                                    onClick={() => handleRejectApplication(app._id)}
+                                  >
+                                    Reject
+                                  </button>
+                                </div>
+                              ) : (
+                                <span style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>
+                                  Reviewed
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Sub-tab 2: Additional Service Applications */}
+            {appSectionTab === 'additional' && (
+              <div>
+                {additionalApplications.length === 0 ? (
+                  <p style={{ textAlign: 'center', padding: '30px', color: 'var(--secondary-text)' }}>
+                    No additional service category applications found.
+                  </p>
+                ) : (
+                  <div className="table-responsive">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Worker Details</th>
+                          <th>Current Approved Categories</th>
+                          <th>Requested Categories</th>
+                          <th>Experience & Notes</th>
+                          <th>Date Submitted</th>
+                          <th>Status</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {additionalApplications.map((app) => (
+                          <tr key={app._id} data-testid={`additional-app-row-${app._id}`}>
+                            <td>
+                              <strong>{app.fullName}</strong>
+                              <div style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>
+                                {app.email} • +91 {app.phone}
+                              </div>
+                            </td>
+                            <td>
+                              {(app.currentCategories || []).length > 0 ? (
+                                (app.currentCategories || []).map((cat) => (
+                                  <span key={cat} className="badge badge-accepted" style={{ marginRight: '4px', marginBottom: '2px', display: 'inline-block' }}>
+                                    {cat}
+                                  </span>
+                                ))
+                              ) : (
+                                <span style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>None</span>
+                              )}
+                            </td>
+                            <td>
+                              {(app.requestedCategories || []).map((cat) => {
+                                const isApproved = (app.approvedCategories || []).includes(cat);
+                                const isRejected = (app.rejectedCategories || []).includes(cat);
+                                let badgeClass = 'badge-pending';
+                                if (isApproved) badgeClass = 'badge-completed';
+                                else if (isRejected) badgeClass = 'badge-cancelled';
+                                return (
+                                  <span
+                                    key={cat}
+                                    className={`badge ${badgeClass}`}
+                                    style={{ marginRight: '4px', marginBottom: '2px', display: 'inline-block' }}
+                                  >
+                                    {cat}
+                                  </span>
+                                );
+                              })}
+                            </td>
+                            <td>
+                              <div style={{ fontSize: '13px' }}><strong>{app.experience} Years</strong></div>
+                              {app.professionalDescription && (
+                                <div style={{ fontSize: '12px', color: '#64748b', maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={app.professionalDescription}>
+                                  {app.professionalDescription}
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ fontSize: '13px' }}>
+                              {new Date(app.createdAt).toLocaleDateString('en-IN', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric'
+                              })}
+                            </td>
+                            <td>
+                              <span className={`badge badge-${app.applicationStatus === 'partially_approved' ? 'accepted' : app.applicationStatus}`}>
+                                {app.applicationStatus.replace('_', ' ')}
+                              </span>
+                            </td>
+                            <td>
+                              {app.applicationStatus === 'pending' ? (
+                                <button
+                                  type="button"
+                                  data-testid={`review-additional-btn-${app._id}`}
+                                  className="btn btn-navy btn-small"
+                                  onClick={() => handleOpenReviewAdditionalModal(app)}
+                                >
+                                  Review & Decide
+                                </button>
+                              ) : (
+                                <div>
+                                  <span style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>
+                                    {app.adminNotes ? `Note: "${app.adminNotes}"` : 'Reviewed'}
+                                  </span>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
           </section>
@@ -817,15 +1046,19 @@ export default function AdminDashboard() {
                 </p>
               </div>
 
-              {/* Two Tabs: Customer Complaints & Worker Complaints (Requirement 7) */}
-              <div style={{ display: 'flex', gap: '8px' }}>
+              {/* Sub-tabs: All, Customer Complaints, Worker Complaints */}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button
+                  type="button"
+                  data-testid="tab-all-complaints"
                   className={`btn ${complaintFilter === 'all' ? 'btn-navy' : 'btn-outline'} btn-small`}
                   onClick={() => setComplaintFilter('all')}
                 >
                   All Complaints ({complaintsList.length})
                 </button>
                 <button
+                  type="button"
+                  data-testid="tab-customer-complaints"
                   className={`btn ${complaintFilter === 'customer' ? 'btn-navy' : 'btn-outline'} btn-small`}
                   onClick={() => setComplaintFilter('customer')}
                 >
@@ -833,6 +1066,8 @@ export default function AdminDashboard() {
                   {complaintsList.filter((c) => c.complaintType === 'customer').length})
                 </button>
                 <button
+                  type="button"
+                  data-testid="tab-worker-complaints"
                   className={`btn ${complaintFilter === 'worker' ? 'btn-navy' : 'btn-outline'} btn-small`}
                   onClick={() => setComplaintFilter('worker')}
                 >
@@ -840,15 +1075,91 @@ export default function AdminDashboard() {
                   {complaintsList.filter((c) => c.complaintType === 'worker').length})
                 </button>
                 <button
+                  type="button"
                   className="btn btn-outline btn-small"
                   onClick={() => api.get('/admin/complaints').then(({ data }) => setComplaintsList(data))}
+                  title="Refresh Complaints"
                 >
                   <RefreshCw size={13} />
                 </button>
               </div>
             </div>
 
-            {/* Complaints Table with exact 11 columns (Requirement 7) */}
+            {/* Filter & Search Controls */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: '12px',
+                marginBottom: '18px',
+                padding: '14px',
+                background: '#f8fafc',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--border-color)'
+              }}
+            >
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--secondary-text)', display: 'block', marginBottom: '4px' }}>
+                  Search by ID / Name / Description
+                </label>
+                <input
+                  type="text"
+                  data-testid="admin-complaint-search-input"
+                  className="form-input"
+                  placeholder="e.g. CMP-WKR or worker name..."
+                  value={complaintSearch}
+                  onChange={(e) => setComplaintSearch(e.target.value)}
+                  style={{ padding: '8px 12px', fontSize: '13px' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--secondary-text)', display: 'block', marginBottom: '4px' }}>
+                  Filter by Category
+                </label>
+                <select
+                  data-testid="admin-complaint-category-filter"
+                  className="form-select"
+                  value={complaintCategoryFilter}
+                  onChange={(e) => setComplaintCategoryFilter(e.target.value)}
+                  style={{ padding: '8px 12px', fontSize: '13px' }}
+                >
+                  <option value="all">All Categories</option>
+                  <option value="Customer Misconduct">Customer Misconduct</option>
+                  <option value="Unsafe Workplace">Unsafe Workplace</option>
+                  <option value="Incorrect Service Information">Incorrect Service Information</option>
+                  <option value="Payment Dispute">Payment Dispute</option>
+                  <option value="Unreasonable Additional Work">Unreasonable Additional Work</option>
+                  <option value="Customer Not Available">Customer Not Available</option>
+                  <option value="Access or Location Issue">Access or Location Issue</option>
+                  <option value="Poor Quality Work">Poor Quality Work</option>
+                  <option value="Worker Absent / No-Show">Worker Absent / No-Show</option>
+                  <option value="Unprofessional Behavior">Unprofessional Behavior</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--secondary-text)', display: 'block', marginBottom: '4px' }}>
+                  Filter by Status
+                </label>
+                <select
+                  data-testid="admin-complaint-status-filter"
+                  className="form-select"
+                  value={complaintStatusFilter}
+                  onChange={(e) => setComplaintStatusFilter(e.target.value)}
+                  style={{ padding: '8px 12px', fontSize: '13px' }}
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="Submitted">Submitted</option>
+                  <option value="Under Review">Under Review</option>
+                  <option value="Resolved">Resolved</option>
+                  <option value="Rejected">Rejected</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Complaints Table with exact 11 columns */}
             <div className="table-responsive">
               <table className="data-table">
                 <thead>
@@ -868,9 +1179,25 @@ export default function AdminDashboard() {
                 </thead>
                 <tbody>
                   {complaintsList
-                    .filter((c) => complaintFilter === 'all' || c.complaintType === complaintFilter)
+                    .filter((c) => {
+                      if (complaintFilter !== 'all' && c.complaintType !== complaintFilter) return false;
+                      if (complaintCategoryFilter !== 'all' && c.category !== complaintCategoryFilter) return false;
+                      if (complaintStatusFilter !== 'all' && c.status !== complaintStatusFilter) return false;
+                      if (complaintSearch.trim()) {
+                        const q = complaintSearch.toLowerCase();
+                        const cId = (c.complaintId || '').toLowerCase();
+                        const desc = (c.description || '').toLowerCase();
+                        const cust = (c.customerId?.name || '').toLowerCase();
+                        const wkr = (c.workerId?.name || c.submittedBy?.name || '').toLowerCase();
+                        const bId = (c.bookingId?.bookingId || (typeof c.bookingId === 'string' ? c.bookingId : '') || '').toLowerCase();
+                        if (!cId.includes(q) && !desc.includes(q) && !cust.includes(q) && !wkr.includes(q) && !bId.includes(q)) {
+                          return false;
+                        }
+                      }
+                      return true;
+                    })
                     .map((comp) => (
-                      <tr key={comp._id}>
+                      <tr key={comp._id} data-testid={`complaint-row-${comp.complaintId}`}>
                         <td>
                           <strong>{comp.complaintId}</strong>
                         </td>
@@ -886,10 +1213,10 @@ export default function AdminDashboard() {
                         </td>
                         <td>{comp.submittedBy?.name || 'User'}</td>
                         <td>{comp.customerId?.name || 'N/A'}</td>
-                        <td>{comp.workerId?.name || 'Unassigned'}</td>
+                        <td>{comp.workerId?.name || comp.submittedBy?.name || 'Unassigned'}</td>
                         <td>
                           <span className="badge badge-pending">
-                            {comp.bookingId?.bookingId || comp.bookingId}
+                            {comp.bookingId?.bookingId || (typeof comp.bookingId === 'string' ? comp.bookingId : 'N/A')}
                           </span>
                         </td>
                         <td>
@@ -921,6 +1248,7 @@ export default function AdminDashboard() {
                         </td>
                         <td>
                           <button
+                            data-testid={`review-complaint-btn-${comp.complaintId}`}
                             className="btn btn-navy btn-small"
                             onClick={() => handleOpenInvestigateModal(comp)}
                             style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
@@ -930,10 +1258,26 @@ export default function AdminDashboard() {
                         </td>
                       </tr>
                     ))}
-                  {complaintsList.filter((c) => complaintFilter === 'all' || c.complaintType === complaintFilter).length === 0 && (
+                  {complaintsList.filter((c) => {
+                    if (complaintFilter !== 'all' && c.complaintType !== complaintFilter) return false;
+                    if (complaintCategoryFilter !== 'all' && c.category !== complaintCategoryFilter) return false;
+                    if (complaintStatusFilter !== 'all' && c.status !== complaintStatusFilter) return false;
+                    if (complaintSearch.trim()) {
+                      const q = complaintSearch.toLowerCase();
+                      const cId = (c.complaintId || '').toLowerCase();
+                      const desc = (c.description || '').toLowerCase();
+                      const cust = (c.customerId?.name || '').toLowerCase();
+                      const wkr = (c.workerId?.name || c.submittedBy?.name || '').toLowerCase();
+                      const bId = (c.bookingId?.bookingId || (typeof c.bookingId === 'string' ? c.bookingId : '') || '').toLowerCase();
+                      if (!cId.includes(q) && !desc.includes(q) && !cust.includes(q) && !wkr.includes(q) && !bId.includes(q)) {
+                        return false;
+                      }
+                    }
+                    return true;
+                  }).length === 0 && (
                     <tr>
                       <td colSpan="11" style={{ textAlign: 'center', padding: '30px', color: 'var(--secondary-text)' }}>
-                        No complaints found under the "{complaintFilter}" filter.
+                        No complaints found matching current filters.
                       </td>
                     </tr>
                   )}
@@ -1166,20 +1510,22 @@ export default function AdminDashboard() {
               <div>
                 <span style={{ color: 'var(--secondary-text)' }}>Customer: </span>
                 <strong>
-                  {investigateComplaint.customerId?.name} ({investigateComplaint.customerId?.phone})
+                  {investigateComplaint.customerId?.name
+                    ? `${investigateComplaint.customerId.name} (${investigateComplaint.customerId.phone || ''})`
+                    : 'N/A (Workplace Issue)'}
                 </strong>
               </div>
               <div>
-                <span style={{ color: 'var(--secondary-text)' }}>Service Worker: </span>
+                <span style={{ color: 'var(--secondary-text)' }}>Worker / Submitter: </span>
                 <strong>
-                  {investigateComplaint.workerId?.name || 'Unassigned'} (
-                  {investigateComplaint.workerId?.phone || 'N/A'})
+                  {investigateComplaint.workerId?.name || investigateComplaint.submittedBy?.name || 'Unassigned'} (
+                  {investigateComplaint.workerId?.phone || investigateComplaint.submittedBy?.phone || 'N/A'})
                 </strong>
               </div>
               <div>
                 <span style={{ color: 'var(--secondary-text)' }}>Booking Reference: </span>
                 <strong>
-                  {investigateComplaint.bookingId?.bookingId || investigateComplaint.bookingId}
+                  {investigateComplaint.bookingId?.bookingId || (typeof investigateComplaint.bookingId === 'string' ? investigateComplaint.bookingId : 'None (General Grievance)')}
                 </strong>
               </div>
               <div>
@@ -1241,6 +1587,7 @@ export default function AdminDashboard() {
             <div className="form-group" style={{ marginBottom: '14px' }}>
               <label>Update Complaint Status *</label>
               <select
+                data-testid="complaint-status-select"
                 className="form-select"
                 value={investigateStatus}
                 onChange={(e) => setInvestigateStatus(e.target.value)}
@@ -1256,6 +1603,7 @@ export default function AdminDashboard() {
             <div className="form-group" style={{ marginBottom: '20px' }}>
               <label>Administrative Resolution Notes</label>
               <textarea
+                data-testid="complaint-admin-notes-input"
                 rows="3"
                 className="form-textarea"
                 placeholder="Document administrative findings, action taken with worker/customer, refunds, or resolution summary..."
@@ -1265,10 +1613,11 @@ export default function AdminDashboard() {
             </div>
 
             {/* Action Buttons */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button
                   type="button"
+                  data-testid="resolve-complaint-btn"
                   className="btn btn-success btn-small"
                   onClick={() => handleUpdateComplaintStatus('Resolved')}
                   disabled={updatingComplaint}
@@ -1277,6 +1626,7 @@ export default function AdminDashboard() {
                 </button>
                 <button
                   type="button"
+                  data-testid="reject-complaint-btn"
                   className="btn btn-danger btn-small"
                   onClick={() => handleUpdateComplaintStatus('Rejected')}
                   disabled={updatingComplaint}
@@ -1295,11 +1645,137 @@ export default function AdminDashboard() {
                 </button>
                 <button
                   type="button"
+                  data-testid="save-complaint-btn"
                   className="btn btn-navy"
                   onClick={() => handleUpdateComplaintStatus()}
                   disabled={updatingComplaint}
                 >
                   {updatingComplaint ? 'Saving...' : 'Save Status & Notes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* MODAL 5: Review Additional Category Application (Feature 2) */}
+      <Modal
+        isOpen={Boolean(reviewAdditionalModalApp)}
+        onClose={() => setReviewAdditionalModalApp(null)}
+        title={`Review Additional Categories: ${reviewAdditionalModalApp?.fullName || ''}`}
+        maxWidth="620px"
+      >
+        {reviewAdditionalModalApp && (
+          <div>
+            <div style={{ padding: '14px', background: '#f8fafc', borderRadius: 'var(--radius-md)', marginBottom: '16px', fontSize: '13px' }}>
+              <div style={{ marginBottom: '6px' }}>
+                <span style={{ color: 'var(--secondary-text)' }}>Applicant: </span>
+                <strong>{reviewAdditionalModalApp.fullName}</strong> ({reviewAdditionalModalApp.email} • +91 {reviewAdditionalModalApp.phone})
+              </div>
+              <div style={{ marginBottom: '6px' }}>
+                <span style={{ color: 'var(--secondary-text)' }}>Experience: </span>
+                <strong>{reviewAdditionalModalApp.experience} Years</strong>
+              </div>
+              <div style={{ marginBottom: '6px' }}>
+                <span style={{ color: 'var(--secondary-text)' }}>Currently Approved Categories: </span>
+                {(reviewAdditionalModalApp.currentCategories || []).length > 0 ? (
+                  (reviewAdditionalModalApp.currentCategories || []).map((cat) => (
+                    <span key={cat} className="badge badge-accepted" style={{ marginRight: '4px', fontSize: '11px' }}>
+                      {cat}
+                    </span>
+                  ))
+                ) : (
+                  <strong>None</strong>
+                )}
+              </div>
+              <div>
+                <span style={{ color: 'var(--secondary-text)' }}>Qualifications / Experience Notes: </span>
+                <p style={{ margin: '4px 0 0 0', color: 'var(--primary-navy)' }}>
+                  {reviewAdditionalModalApp.professionalDescription || 'No additional notes provided.'}
+                </p>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--primary-navy)', marginBottom: '8px' }}>
+              Select Requested Categories to Approve:
+            </p>
+            <p style={{ fontSize: '12px', color: 'var(--secondary-text)', marginBottom: '12px' }}>
+              Check each category you wish to approve for this worker. Unchecked categories will be marked as rejected.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', marginBottom: '18px' }}>
+              {(reviewAdditionalModalApp.requestedCategories || []).map((cat) => {
+                const isChecked = reviewApprovedCats.includes(cat);
+                return (
+                  <label
+                    key={cat}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '10px 14px',
+                      border: `1.5px solid ${isChecked ? 'var(--primary-navy)' : 'var(--border-color)'}`,
+                      borderRadius: 'var(--radius-md)',
+                      background: isChecked ? 'rgba(15, 23, 42, 0.04)' : '#fff',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      data-testid={`checkbox-approve-${cat}`}
+                      checked={isChecked}
+                      onChange={() => {
+                        setReviewApprovedCats((prev) =>
+                          prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
+                        );
+                      }}
+                    />
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--primary-navy)' }}>{cat}</span>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '20px' }}>
+              <label style={{ fontSize: '13px', fontWeight: 600 }}>Admin Review Notes / Justification</label>
+              <textarea
+                data-testid="admin-additional-notes-input"
+                rows="3"
+                className="form-textarea"
+                placeholder="Enter feedback or review notes for the worker (e.g. Approved based on verified certificate)..."
+                value={reviewAdminNotes}
+                onChange={(e) => setReviewAdminNotes(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+              <button
+                type="button"
+                data-testid="admin-reject-app-btn"
+                className="btn btn-danger"
+                disabled={reviewingAdditional}
+                onClick={() => handleReviewAdditional('reject')}
+              >
+                Reject All
+              </button>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => setReviewAdditionalModalApp(null)}
+                  disabled={reviewingAdditional}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  data-testid="admin-approve-cats-btn"
+                  className="btn btn-success"
+                  disabled={reviewingAdditional || reviewApprovedCats.length === 0}
+                  onClick={() => handleReviewAdditional('approve')}
+                >
+                  {reviewingAdditional ? 'Saving...' : `Approve Selected (${reviewApprovedCats.length})`}
                 </button>
               </div>
             </div>

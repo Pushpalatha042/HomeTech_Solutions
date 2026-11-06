@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../api';
+import { getServiceImage, homeMaintenanceImg } from '../../assets/images';
 
 const TIME_SLOTS = [
   '09:00 AM',
@@ -205,11 +206,11 @@ export default function BookingPage() {
           {/* Service Image matching Prototype */}
           <div style={{ margin: '14px 0' }}>
             <img
-              src={currentService?.image || '/assets/images/plumbing.jpg'}
+              src={getServiceImage(currentService)}
               alt={currentService?.name || 'Service Booking'}
               onError={(e) => {
                 e.target.onerror = null;
-                e.target.src = '/assets/images/home-maintenance.jpg';
+                e.target.src = homeMaintenanceImg;
               }}
               style={{
                 width: '100%',

@@ -22,6 +22,12 @@ import {
   UserCheck
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import {
+  serviceCategoryImages,
+  plumbingImg,
+  homeMaintenanceImg,
+  getServiceImage
+} from '../../assets/images';
 
 const categoryIcons = {
   Plumbing: Wrench,
@@ -35,17 +41,7 @@ const categoryIcons = {
   'Home Maintenance': HomeIcon
 };
 
-const categoryImages = {
-  Plumbing: '/assets/images/plumbing.jpg',
-  Electrical: '/assets/images/electrical.jpg',
-  Cleaning: '/assets/images/cleaning.jpg',
-  Carpentry: '/assets/images/carpentry.jpg',
-  Painting: '/assets/images/painting.jpg',
-  'Appliance Repair': '/assets/images/appliance.jpg',
-  'AC Repair': '/assets/images/ac-repair.jpg',
-  'Pest Control': '/assets/images/pest-control.jpg',
-  'Home Maintenance': '/assets/images/home-maintenance.jpg'
-};
+const categoryImages = serviceCategoryImages;
 
 const testimonials = [
   {
@@ -212,11 +208,11 @@ export default function HomePage() {
           {/* Hero Image */}
           <div style={{ position: 'relative' }}>
             <img
-              src="/assets/images/plumbing.jpg"
-              alt="Professional Plumber Fixing Sink"
+              src={homeMaintenanceImg}
+              alt="Professional Home Maintance"
               onError={(e) => {
                 e.target.onerror = null;
-                e.target.src = '/assets/images/home-maintenance.jpg';
+                e.target.src = homeMaintenanceImg;
               }}
               style={{
                 width: '100%',
@@ -286,7 +282,7 @@ export default function HomePage() {
         >
           {categories.map((cat) => {
             const Icon = categoryIcons[cat.name] || Wrench;
-            const imgPath = categoryImages[cat.name] || '/assets/images/plumbing.jpg';
+            const imgPath = categoryImages[cat.name] || plumbingImg;
             return (
               <Link
                 key={cat._id}
@@ -320,7 +316,7 @@ export default function HomePage() {
                     alt={cat.name}
                     onError={(e) => {
                       e.target.onerror = null;
-                      e.target.src = '/assets/images/home-maintenance.jpg';
+                      e.target.src = homeMaintenanceImg;
                     }}
                     style={{
                       width: '100%',
@@ -383,11 +379,11 @@ export default function HomePage() {
             {featuredServices.map((service) => (
               <div key={service._id} className="service-card">
                 <img
-                  src={service.image || '/assets/images/plumbing.jpg'}
+                  src={getServiceImage(service)}
                   alt={service.name}
                   onError={(e) => {
                     e.target.onerror = null;
-                    e.target.src = '/assets/images/home-maintenance.jpg';
+                    e.target.src = homeMaintenanceImg;
                   }}
                   className="service-card-image"
                   style={{ height: '200px', objectFit: 'cover' }}

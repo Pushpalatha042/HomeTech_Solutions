@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import DashboardSidebar from '../../components/sidebar/DashboardSidebar';
 import Modal from '../../components/common/Modal';
 import api from '../../api';
+import { getServiceImage, homeMaintenanceImg } from '../../assets/images';
 
 export default function PaymentsPage() {
   const { notify } = useAuth();
@@ -119,11 +120,11 @@ export default function PaymentsPage() {
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <img
-                            src={p.bookingId?.serviceId?.image || '/assets/images/plumbing.jpg'}
+                            src={getServiceImage(p.bookingId?.serviceId)}
                             alt="Service"
                             onError={(e) => {
                               e.target.onerror = null;
-                              e.target.src = '/assets/images/home-maintenance.jpg';
+                              e.target.src = homeMaintenanceImg;
                             }}
                             style={{
                               width: '38px',

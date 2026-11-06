@@ -22,6 +22,7 @@ import { useSocket } from '../../context/SocketContext';
 import DashboardSidebar from '../../components/sidebar/DashboardSidebar';
 import Modal from '../../components/common/Modal';
 import api from '../../api';
+import { getServiceImage, homeMaintenanceImg } from '../../assets/images';
 
 const RATING_LABELS = {
   1: '1 Star — Very Poor',
@@ -39,6 +40,24 @@ const CUSTOMER_COMPLAINT_CATEGORIES = [
   'Payment Issue',
   'Other'
 ];
+
+// Status checking helpers
+const isInProgress = (status) => {
+  if (!status) return false;
+  const s = String(status).trim().toLowerCase();
+  return s === 'in-progress' || s === 'in progress' || s === 'in_progress';
+};
+
+const isCompleted = (status) => {
+  if (!status) return false;
+  return String(status).trim().toLowerCase() === 'completed';
+};
+
+const isAcceptedOrAssigned = (status) => {
+  if (!status) return false;
+  const s = String(status).trim().toLowerCase();
+  return s === 'accepted' || s === 'assigned';
+};
 
 export default function BookingHistoryPage() {
   const { user, notify } = useAuth();
@@ -488,11 +507,11 @@ export default function BookingHistoryPage() {
                       }}
                     >
                       <img
-                        src={b.serviceId?.image || '/assets/images/plumbing.jpg'}
+                        src={getServiceImage(b.serviceId || b)}
                         alt={b.category}
                         onError={(e) => {
                           e.target.onerror = null;
-                          e.target.src = '/assets/images/home-maintenance.jpg';
+                          e.target.src = homeMaintenanceImg;
                         }}
                         style={{
                           width: '56px',
@@ -555,26 +574,27 @@ export default function BookingHistoryPage() {
 
                       {/* Action Buttons Column */}
                       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                        {/* Track Worker button */}
-                        {['Assigned', 'Accepted', 'In Progress'].includes(b.status) && (
+                        {/* Track Worker button: Only visible during Accepted / Assigned (Removed during In-Progress) */}
+                        {isAcceptedOrAssigned(b.status) && !isInProgress(b.status) && (
                           <Link to={`/tracking/${b._id}`} className="btn btn-yellow btn-small">
                             <MapPinned size={14} /> Track Worker
                           </Link>
                         )}
 
-                        {/* CONFIRM COMPLETION BUTTON (Requirement 4: For In Progress bookings) */}
-                        {b.status === 'In Progress' && (
+                        {/* COMPLETE SERVICE BUTTON (Requirement 4: For in-progress bookings) */}
+                        {isInProgress(b.status) && (
                           <button
                             className="btn btn-success btn-small"
+                            data-testid="complete-service-btn"
                             onClick={() => setCompletionConfirmBooking(b)}
                             style={{ display: 'flex', alignItems: 'center', gap: '5px', fontWeight: 700 }}
                           >
-                            <CheckCircle2 size={15} /> Confirm Completion
+                            <CheckCircle2 size={15} /> Complete Service
                           </button>
                         )}
 
                         {/* Cancel button */}
-                        {['Pending', 'Confirmed'].includes(b.status) && (
+                        {['Pending', 'Confirmed', 'pending', 'confirmed'].includes(b.status) && (
                           <button
                             className="btn btn-danger btn-small"
                             onClick={() => handleCancelBooking(b._id)}
@@ -583,18 +603,19 @@ export default function BookingHistoryPage() {
                           </button>
                         )}
 
-                        {/* Raise Complaint Button for completed or ongoing jobs */}
-                        {['In Progress', 'Completed'].includes(b.status) && (
+                        {/* RAISE A COMPLAINT BUTTON (Requirement 4: For in-progress or completed jobs) */}
+                        {(isInProgress(b.status) || isCompleted(b.status) || isAcceptedOrAssigned(b.status)) && (
                           <button
                             className="btn btn-outline btn-small"
+                            data-testid="raise-complaint-btn"
                             onClick={() => handleOpenComplaintModal(b)}
                             style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
                           >
-                            <AlertCircle size={14} /> Raise Complaint
+                            <AlertCircle size={14} /> Raise a Complaint
                           </button>
                         )}
 
-                        {['Completed', 'Cancelled'].includes(b.status) && (
+                        {(isCompleted(b.status) || ['Cancelled', 'cancelled'].includes(b.status)) && (
                           <Link to="/services" className="btn btn-outline btn-small">
                             Rebook
                           </Link>

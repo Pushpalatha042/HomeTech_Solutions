@@ -1,4 +1,5 @@
 import http from 'http';
+import fs from 'fs';
 
 const BASE_URL = 'http://localhost:5000/api';
 
@@ -72,10 +73,17 @@ async function runTests() {
   // Test 5: Real SMS Gateway Mock Flow
   const testPhone = '98765432' + Math.floor(10 + Math.random() * 89);
   const sendOtp = await request('/auth/send-otp', 'POST', { phone: testPhone });
-  console.log('5. Send OTP:', sendOtp.ok ? 'PASS' : 'FAIL', `Dev OTP: ${sendOtp.data?.devOtp}`);
-  const devOtp = sendOtp.data?.devOtp;
+  console.log('5. Send OTP (No OTP leaked in API response):', sendOtp.ok && !sendOtp.data?.devOtp ? 'PASS' : 'FAIL', sendOtp.data?.message);
+  
+  // Read dispatched OTP from gateway outbox audit log
+  let dispatchedOtp = '123456';
+  try {
+    const outbox = JSON.parse(fs.readFileSync('./data/sms_gateway_outbox.json', 'utf8'));
+    const entry = outbox.find(e => e.cleanPhone === testPhone || e.phone === `+91${testPhone}`);
+    if (entry) dispatchedOtp = entry.otp;
+  } catch (e) {}
 
-  const verifyOtp = await request('/auth/verify-otp', 'POST', { phone: testPhone, otp: devOtp });
+  const verifyOtp = await request('/auth/verify-otp', 'POST', { phone: testPhone, otp: dispatchedOtp });
   console.log('5b. Verify OTP:', verifyOtp.ok ? 'PASS' : 'FAIL', verifyOtp.data?.message);
 
   const regRes = await request('/auth/register', 'POST', {

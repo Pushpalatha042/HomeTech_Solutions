@@ -1,7 +1,29 @@
-import { Link } from 'react-router-dom';
-import { Wrench, MapPin, Phone, Mail, ShieldCheck } from 'lucide-react';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Wrench, MapPin, Phone, Mail, ShieldCheck, Briefcase } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import WorkerApplicationModal from './WorkerApplicationModal';
 
 export default function Footer() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [isWorkerModalOpen, setIsWorkerModalOpen] = useState(false);
+
+  const isWorkerApproved = user?.roles?.includes('worker') && user?.workerStatus === 'approved';
+
+  const handleJoinAsWorker = () => {
+    if (!user) {
+      navigate('/login', {
+        state: {
+          from: '/customer/dashboard',
+          message: 'Please log in to submit your worker application.'
+        }
+      });
+    } else {
+      setIsWorkerModalOpen(true);
+    }
+  };
+
   return (
     <footer className="site-footer">
       <div className="container">
@@ -42,8 +64,34 @@ export default function Footer() {
               <li><Link to="/">Home</Link></li>
               <li><Link to="/services">All Services</Link></li>
               <li><Link to="/contact">Contact Support</Link></li>
-              <li><Link to="/login">Customer Login</Link></li>
-              <li><Link to="/register">Create Account</Link></li>
+
+              {/* Join as a Worker: shown for logged-out visitors and customers; hidden for approved workers */}
+              {!isWorkerApproved && (
+                <li>
+                  <button
+                    type="button"
+                    onClick={handleJoinAsWorker}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      color: 'rgba(255,255,255,0.75)',
+                      fontSize: '14px',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      fontFamily: 'inherit',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'color 0.2s ease'
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--accent-yellow)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = 'rgba(255,255,255,0.75)')}
+                  >
+                    <Briefcase size={14} /> Join as a Worker
+                  </button>
+                </li>
+              )}
             </ul>
           </div>
 
@@ -87,6 +135,12 @@ export default function Footer() {
           </p>
         </div>
       </div>
+
+      {/* Worker Application Modal for Join as a Worker */}
+      <WorkerApplicationModal
+        isOpen={isWorkerModalOpen}
+        onClose={() => setIsWorkerModalOpen(false)}
+      />
     </footer>
   );
 }

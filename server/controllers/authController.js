@@ -38,12 +38,12 @@ export async function sendOTP(req, res) {
       }
     }
 
-    // Rate-limit check: cooldown of 30 seconds
+    // Rate-limit check: cooldown of 60 seconds
     const existingOTP = await OTPVerification.findOne({ phone: cleanPhone });
     if (existingOTP && existingOTP.lastSentAt) {
       const secondsSince = (Date.now() - new Date(existingOTP.lastSentAt).getTime()) / 1000;
-      if (secondsSince < 30) {
-        const remaining = Math.ceil(30 - secondsSince);
+      if (secondsSince < 60) {
+        const remaining = Math.ceil(60 - secondsSince);
         return res.status(429).json({
           message: `Please wait ${remaining} seconds before requesting a new OTP.`
         });
@@ -68,12 +68,11 @@ export async function sendOTP(req, res) {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    const smsResult = await sendSMSOTP(cleanPhone, otp);
-
+    // Development mode: Return OTP directly without external SMS gateway dependencies
     res.json({
       success: true,
-      message: 'OTP has been sent to your mobile number.',
-      devOtp: smsResult.devOtp,
+      message: 'Development Mode: OTP generated successfully.',
+      devOtp: otp,
       expiresInSeconds: 300
     });
   } catch (err) {
@@ -100,22 +99,33 @@ export async function verifyOTP(req, res) {
       return res.status(400).json({ message: 'No OTP requested for this mobile number. Please request an OTP.' });
     }
 
-    // Check expiration
+    // Check expiration (5 minutes validity)
     if (new Date() > new Date(record.expiresAt)) {
       await OTPVerification.deleteOne({ _id: record._id });
       return res.status(400).json({ message: 'OTP has expired. Please request a new OTP.' });
     }
 
-    // Check attempt limit
+    // Prevent replay attacks using already verified OTP
+    if (record.verifiedAt) {
+      return res.status(400).json({ message: 'This OTP has already been verified and cannot be reused.' });
+    }
+
+    // Check attempt limit (max 5 failed attempts)
     if (record.attempts >= 5) {
       await OTPVerification.deleteOne({ _id: record._id });
-      return res.status(400).json({ message: 'Too many incorrect attempts. Please request a new OTP.' });
+      return res.status(400).json({ message: 'Too many incorrect attempts (maximum 5). Please request a new OTP.' });
     }
 
     // Check match
     const isMatch = await bcrypt.compare(otp.trim(), record.otpHash);
     if (!isMatch) {
       record.attempts += 1;
+      if (record.attempts >= 5) {
+        await OTPVerification.deleteOne({ _id: record._id });
+        return res.status(400).json({
+          message: 'Too many incorrect attempts (maximum 5). Please request a new OTP.'
+        });
+      }
       await record.save();
       const remaining = 5 - record.attempts;
       return res.status(400).json({
@@ -167,6 +177,16 @@ export async function register(req, res) {
       return res.status(400).json({ message: 'Confirm password does not match password.' });
     }
 
+    // Check duplicates before OTP verification
+    const emailExists = await User.findOne({ email: cleanEmail });
+    if (emailExists) {
+      return res.status(409).json({ message: 'An account with this email address already exists.' });
+    }
+    const phoneExists = await User.findOne({ phone: cleanPhone });
+    if (phoneExists) {
+      return res.status(409).json({ message: 'An account with this mobile number already exists.' });
+    }
+
     // Check if phone was verified via OTP
     const otpRecord = await OTPVerification.findOne({ phone: cleanPhone });
     let isVerified = false;
@@ -188,16 +208,6 @@ export async function register(req, res) {
       return res.status(400).json({
         message: 'Mobile number verification is mandatory. Please verify your OTP before registering.'
       });
-    }
-
-    // Check duplicates
-    const emailExists = await User.findOne({ email: cleanEmail });
-    if (emailExists) {
-      return res.status(409).json({ message: 'An account with this email address already exists.' });
-    }
-    const phoneExists = await User.findOne({ phone: cleanPhone });
-    if (phoneExists) {
-      return res.status(409).json({ message: 'An account with this mobile number already exists.' });
     }
 
     // Hash password
@@ -236,8 +246,8 @@ export async function register(req, res) {
 export async function login(req, res) {
   try {
     const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ message: 'Email and password are required.' });
+    if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ message: 'Valid email and password strings are required.' });
     }
 
     const cleanEmail = email.trim().toLowerCase();
@@ -358,21 +368,33 @@ export async function forgotPassword(req, res) {
       return res.status(404).json({ message: 'No registered account found with this mobile number.' });
     }
 
+    // Rate-limit check: cooldown of 60 seconds
+    const existingOTP = await OTPVerification.findOne({ phone: cleanPhone });
+    if (existingOTP && existingOTP.lastSentAt) {
+      const secondsSince = (Date.now() - new Date(existingOTP.lastSentAt).getTime()) / 1000;
+      if (secondsSince < 60) {
+        const remaining = Math.ceil(60 - secondsSince);
+        return res.status(429).json({
+          message: `Please wait ${remaining} seconds before requesting a new OTP.`
+        });
+      }
+    }
+
     const otp = generateOTP();
     const otpHash = await bcrypt.hash(otp, 10);
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
     await OTPVerification.findOneAndUpdate(
       { phone: cleanPhone },
-      { $set: { otpHash, expiresAt, attempts: 0, lastSentAt: new Date() } },
+      { $set: { otpHash, expiresAt, attempts: 0, lastSentAt: new Date(), verifiedAt: null } },
       { upsert: true, new: true }
     );
 
-    const sms = await sendSMSOTP(cleanPhone, otp);
     res.json({
       success: true,
-      message: 'Password reset OTP sent to your mobile number.',
-      devOtp: sms.devOtp
+      message: 'Development Mode: Password reset OTP generated successfully.',
+      devOtp: otp,
+      expiresInSeconds: 300
     });
   } catch (err) {
     res.status(500).json({ message: 'Failed to process forgot password request.' });

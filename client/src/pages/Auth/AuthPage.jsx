@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Eye,
@@ -21,7 +21,18 @@ export default function AuthPage({ defaultTab = 'login' }) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const from = location.state?.from?.pathname || '/';
+  useEffect(() => {
+    setActiveTab(defaultTab);
+  }, [defaultTab]);
+
+  const from = location.state?.from?.pathname || location.state?.from || '/';
+
+  // Display notice if redirected with a message (e.g. from footer Join as a Worker)
+  useEffect(() => {
+    if (location.state?.message) {
+      notify(location.state.message, 'info');
+    }
+  }, [location.state]);
 
   // Login State
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
@@ -74,23 +85,13 @@ export default function AuthPage({ defaultTab = 'login' }) {
       } else if (data.user.roles.includes('worker') && data.user.activeRole === 'worker') {
         navigate('/worker/dashboard');
       } else {
-        navigate(from === '/login' || from === '/register' ? '/customer/dashboard' : from);
+        const dest = from && from !== '/' && from !== '/login' && from !== '/register' ? from : '/customer/dashboard';
+        navigate(dest);
       }
     } catch (err) {
       notify(err.response?.data?.message || 'Invalid email or password.', 'danger');
     } finally {
       setLoginLoading(false);
-    }
-  };
-
-  // Quick Demo Account Auto-Fill
-  const fillDemoAccount = (role) => {
-    if (role === 'admin') {
-      setLoginForm({ email: 'admin@hometech.demo', password: 'HomeTech@123' });
-    } else if (role === 'worker') {
-      setLoginForm({ email: 'worker@hometech.demo', password: 'HomeTech@123' });
-    } else {
-      setLoginForm({ email: 'customer@hometech.demo', password: 'HomeTech@123' });
     }
   };
 
@@ -107,11 +108,13 @@ export default function AuthPage({ defaultTab = 'login' }) {
         purpose: 'registration'
       });
       setOtpSent(true);
-      if (data.devOtp) setDevOtpHint(data.devOtp);
-      notify(data.message, 'success');
+      if (data.devOtp) {
+        setDevOtpHint(data.devOtp);
+      }
+      notify(data.message || 'OTP generated successfully.', 'info');
 
-      // Start 45s resend cooldown
-      setCooldown(45);
+      // Start 60s resend cooldown matching backend rate limit
+      setCooldown(60);
       const interval = setInterval(() => {
         setCooldown((prev) => {
           if (prev <= 1) {
@@ -365,44 +368,18 @@ export default function AuthPage({ defaultTab = 'login' }) {
               >
                 {loginLoading ? 'Logging in...' : 'Login'}
               </button>
-
-              {/* Demo 1-Click Credentials Helper */}
-              <div
-                style={{
-                  marginTop: '28px',
-                  background: 'var(--bg-color)',
-                  padding: '16px',
-                  borderRadius: 'var(--radius-md)',
-                  border: '1px solid var(--border-color)'
-                }}
-              >
-                <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--secondary-text)', marginBottom: '8px' }}>
-                  QUICK 1-CLICK DEMO LOGIN (PASSWORD: HomeTech@123)
+              <br/><br/>
+              <div style={{textAlign: 'center'}}
+              > <p style={{fontSize:'13px'}}>Don't have an account at? <button 
+              onClick={() => setActiveTab('register')}
+              style={{
+                padding: '8px',
+                background: 'none',
+                border: 'none',
+                color: 'var(--primary-navy)',
+                fontSize: '15px'
+                }}><b>Register</b></button></p>
                 </div>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    className="btn btn-outline btn-small"
-                    onClick={() => fillDemoAccount('customer')}
-                  >
-                    Customer
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-outline btn-small"
-                    onClick={() => fillDemoAccount('worker')}
-                  >
-                    Worker (Plumber)
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-outline btn-small"
-                    onClick={() => fillDemoAccount('admin')}
-                  >
-                    Administrator
-                  </button>
-                </div>
-              </div>
             </form>
           )}
 
@@ -464,17 +441,12 @@ export default function AuthPage({ defaultTab = 'login' }) {
                     {otpLoading
                       ? 'Sending...'
                       : cooldown > 0
-                      ? `${cooldown}s`
+                      ? `Resend in ${cooldown}s`
                       : otpSent
                       ? 'Resend OTP'
                       : 'Send OTP'}
                   </button>
                 </div>
-                {devOtpHint && (
-                  <span style={{ fontSize: '12px', color: 'var(--success)', fontWeight: 600, marginTop: '4px' }}>
-                    [Dev OTP]: {devOtpHint}
-                  </span>
-                )}
               </div>
 
               {/* OTP Verification Box */}
@@ -488,10 +460,44 @@ export default function AuthPage({ defaultTab = 'login' }) {
                     border: '1px solid var(--accent-yellow)'
                   }}
                 >
-                  <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--primary-navy)' }}>
-                    Enter 6-Digit OTP *
-                  </label>
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--primary-navy)' }}>
+                      Enter 6-Digit OTP *
+                    </label>
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        background: 'var(--primary-navy)',
+                        color: 'var(--white)',
+                        padding: '2px 8px',
+                        borderRadius: 'var(--radius-full)',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px'
+                      }}
+                    >
+                      Development Mode
+                    </span>
+                  </div>
+
+                  {devOtpHint && (
+                    <div
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.9)',
+                        border: '1px dashed var(--primary-navy)',
+                        borderRadius: 'var(--radius-sm)',
+                        padding: '8px 12px',
+                        marginBottom: '10px',
+                        fontSize: '13px',
+                        color: 'var(--primary-navy)',
+                        fontWeight: 600
+                      }}
+                    >
+                      Your OTP is: <strong style={{ letterSpacing: '3px', fontSize: '16px', color: 'var(--primary-navy)' }}>{devOtpHint}</strong>
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', gap: '8px' }}>
                     <input
                       type="text"
                       maxLength={6}

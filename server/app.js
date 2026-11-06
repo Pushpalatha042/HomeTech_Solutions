@@ -44,6 +44,7 @@ app.use('/api/services', serviceRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/worker-applications', workerApplicationRoutes);
 app.use('/api/workers', workerRoutes);
+app.use('/api/worker', workerRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/tracking', trackingRoutes);
@@ -63,6 +64,10 @@ app.use((err, _req, res, _next) => {
   if (err.name === 'ValidationError') return res.status(400).json({ message: err.message });
   if (err.code === 11000) return res.status(409).json({ message: 'That record already exists.' });
   if (err.name === 'CastError') return res.status(400).json({ message: 'Invalid record identifier.' });
+  if (err.name === 'MulterError') return res.status(400).json({ message: err.message });
+  if (err.message && (err.message.includes('supported') || err.message.includes('image formats'))) {
+    return res.status(400).json({ message: err.message });
+  }
   res.status(500).json({ message: 'Internal Server Error. Please try again.' });
 });
 

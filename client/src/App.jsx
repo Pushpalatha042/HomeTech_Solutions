@@ -125,6 +125,22 @@ export default function App() {
               </RequireAuth>
             }
           />
+          <Route
+            path="/worker/history"
+            element={
+              <RequireAuth role="worker">
+                <WorkerDashboard initialTab="history" />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/worker/service-history"
+            element={
+              <RequireAuth role="worker">
+                <WorkerDashboard initialTab="history" />
+              </RequireAuth>
+            }
+          />
 
           {/* Admin Dashboard (Page 12 - Only for admin) */}
           <Route

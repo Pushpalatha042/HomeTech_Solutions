@@ -12,6 +12,7 @@ import {
   UserCheck
 } from 'lucide-react';
 import api from '../../api';
+import { getServiceImage, homeMaintenanceImg } from '../../assets/images';
 
 export default function ServiceDetailsPage() {
   const { id } = useParams();
@@ -83,11 +84,11 @@ export default function ServiceDetailsPage() {
         {/* Left: Service Image */}
         <div>
           <img
-            src={service.image || '/assets/images/plumbing.jpg'}
+            src={getServiceImage(service)}
             alt={service.name}
             onError={(e) => {
               e.target.onerror = null;
-              e.target.src = '/assets/images/home-maintenance.jpg';
+              e.target.src = homeMaintenanceImg;
             }}
             style={{
               width: '100%',

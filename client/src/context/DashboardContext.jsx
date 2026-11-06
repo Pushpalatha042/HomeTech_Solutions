@@ -120,9 +120,9 @@ export function DashboardProvider({ children }) {
         const jd = jobsRes.value.data;
         requests = jd.requests || jd.availableRequests || [];
         const allAssigned = jd.assignedJobs || [];
-        accepted = jd.accepted || allAssigned.filter((j) => ['Accepted', 'Awaiting Arrival Verification', 'Assigned'].includes(j.status));
-        ongoing = jd.ongoing || allAssigned.filter((j) => j.status === 'In Progress');
-        completed = jd.history || jd.completedJobs || [];
+        accepted = jd.accepted || allAssigned.filter((j) => ['Accepted', 'accepted', 'Awaiting Arrival Verification', 'awaiting-arrival-verification', 'Assigned', 'assigned'].includes(j.status));
+        ongoing = jd.ongoing || allAssigned.filter((j) => ['In Progress', 'in-progress', 'in_progress'].includes(j.status));
+        completed = jd.history || jd.completedJobs || allAssigned.filter((j) => ['Completed', 'completed'].includes(j.status));
       }
 
       // Merge persistent WorkRequests if returned
@@ -214,15 +214,25 @@ export function DashboardProvider({ children }) {
       }
     };
 
-    // 2. Arrival Verified (Status -> In Progress)
+    // 2. Arrival Verified (Status -> in-progress)
     const handleArrivalVerified = (payload) => {
       console.log('[SOCKET] arrival-verified received:', payload);
-      if (payload && payload.bookingId) {
+      if (payload && (payload.bookingId || payload.bookingReadableId)) {
         setActiveArrivalOtps((prev) => {
           const next = { ...prev };
-          delete next[payload.bookingId];
+          if (payload.bookingId) delete next[payload.bookingId];
           return next;
         });
+
+        // Immediately update customer bookings in local state
+        setCustomerBookings((prev) =>
+          prev.map((b) =>
+            b._id === payload.bookingId || b.bookingId === payload.bookingReadableId
+              ? { ...b, status: 'in-progress', startedAt: payload.startedAt || new Date() }
+              : b
+          )
+        );
+
         fetchCustomerBookings(true);
         if (user.roles?.includes('worker')) {
           fetchWorkerJobs(true);
@@ -233,6 +243,15 @@ export function DashboardProvider({ children }) {
     // 3. Status Updated
     const handleStatusUpdated = (payload) => {
       console.log('[SOCKET] booking-status-updated received:', payload);
+      if (payload && (payload.bookingId || payload.bookingReadableId) && payload.status) {
+        setCustomerBookings((prev) =>
+          prev.map((b) =>
+            b._id === payload.bookingId || b.bookingId === payload.bookingReadableId
+              ? { ...b, status: payload.status }
+              : b
+          )
+        );
+      }
       fetchCustomerBookings(true);
       if (user.roles?.includes('worker')) {
         fetchWorkerJobs(true);

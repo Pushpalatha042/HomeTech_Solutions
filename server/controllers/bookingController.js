@@ -417,7 +417,7 @@ export async function updateBookingStatus(req, res) {
     if (!booking) return res.status(404).json({ message: 'Booking not found.' });
 
     booking.status = status;
-    if (status === 'Completed') {
+    if (status === 'Completed' || status === 'completed') {
       booking.paymentStatus = 'Paid';
       booking.completedAt = new Date();
     }
@@ -490,7 +490,12 @@ export async function startArrivalVerification(req, res) {
       verifiedAt: null
     };
 
-    await booking.save();
+    await Booking.findByIdAndUpdate(booking._id, {
+      $set: {
+        status: 'Awaiting Arrival Verification',
+        arrivalOtp: booking.arrivalOtp
+      }
+    });
 
     const io = req.app.get('io');
     if (io) {
@@ -598,9 +603,12 @@ export async function verifyArrivalOtp(req, res) {
 
     const submittedHash = hashOtp(String(otp).trim());
     if (submittedHash !== otpData.codeHash) {
-      booking.arrivalOtp.attemptsCount = (booking.arrivalOtp.attemptsCount || 0) + 1;
-      await booking.save();
-      const remaining = Math.max(0, 5 - booking.arrivalOtp.attemptsCount);
+      const newAttempts = (booking.arrivalOtp?.attemptsCount || 0) + 1;
+      booking.arrivalOtp.attemptsCount = newAttempts;
+      await Booking.findByIdAndUpdate(booking._id, {
+        $set: { 'arrivalOtp.attemptsCount': newAttempts }
+      });
+      const remaining = Math.max(0, 5 - newAttempts);
       return res.status(400).json({
         success: false,
         message: `Incorrect OTP. ${remaining} attempt(s) remaining.`,
@@ -608,9 +616,9 @@ export async function verifyArrivalOtp(req, res) {
       });
     }
 
-    // Success! Update booking status to In Progress
+    // Success! Update booking status to in-progress
     const now = new Date();
-    booking.status = 'In Progress';
+    booking.status = 'in-progress';
     booking.startedAt = now;
     booking.arrivalVerifiedAt = now;
     booking.arrivalOtp.isVerified = true;
@@ -618,7 +626,17 @@ export async function verifyArrivalOtp(req, res) {
     booking.arrivalOtp.codeHash = null;
     booking.arrivalOtp.encryptedCode = null;
 
-    await booking.save();
+    await Booking.findByIdAndUpdate(booking._id, {
+      $set: {
+        status: 'in-progress',
+        startedAt: now,
+        arrivalVerifiedAt: now,
+        'arrivalOtp.isVerified': true,
+        'arrivalOtp.verifiedAt': now,
+        'arrivalOtp.codeHash': null,
+        'arrivalOtp.encryptedCode': null
+      }
+    });
 
     const populated = await Booking.findById(booking._id)
       .populate('customerId', 'name email phone address profileImage')
@@ -630,7 +648,7 @@ export async function verifyArrivalOtp(req, res) {
       const payload = {
         bookingId: booking._id.toString(),
         bookingReadableId: booking.bookingId,
-        status: 'In Progress',
+        status: 'in-progress',
         startedAt: now,
         arrivalVerifiedAt: now,
         booking: populated,
@@ -786,7 +804,9 @@ export async function resendArrivalOtp(req, res) {
       verifiedAt: null
     };
 
-    await booking.save();
+    await Booking.findByIdAndUpdate(booking._id, {
+      $set: { arrivalOtp: booking.arrivalOtp }
+    });
 
     const io = req.app.get('io');
     if (io) {
@@ -853,21 +873,29 @@ export async function confirmCompletion(req, res) {
     console.log('[COMPLETION] Booking ownership verified');
 
     // Prevent duplicate completion
-    if (booking.status === 'Completed') {
+    if (['completed', 'Completed'].includes(booking.status)) {
       return res.status(400).json({ message: 'This booking has already been confirmed as completed.' });
     }
 
     // Do not allow completion before worker has started the job
-    if (booking.status !== 'In Progress') {
+    const isStarted = ['in-progress', 'In Progress', 'in_progress'].includes(booking.status);
+    if (!isStarted) {
       return res.status(400).json({
-        message: 'Completion can only be confirmed after the worker has started the job (status: In Progress).'
+        message: 'Completion can only be confirmed after the worker has started the job (status: in-progress).'
       });
     }
 
-    booking.status = 'Completed';
+    const now = new Date();
+    booking.status = 'completed';
     booking.paymentStatus = 'Paid';
-    booking.completedAt = new Date();
-    await booking.save();
+    booking.completedAt = now;
+    await Booking.findByIdAndUpdate(booking._id, {
+      $set: {
+        status: 'completed',
+        paymentStatus: 'Paid',
+        completedAt: now
+      }
+    });
     console.log('[COMPLETION] Booking updated successfully');
 
     const populated = await Booking.findById(booking._id)
@@ -880,8 +908,8 @@ export async function confirmCompletion(req, res) {
       const payload = {
         bookingId: booking._id.toString(),
         bookingReadableId: booking.bookingId,
-        status: 'Completed',
-        completedAt: booking.completedAt,
+        status: 'completed',
+        completedAt: now,
         booking: populated
       };
       io.to(`booking:${booking._id.toString()}`).emit('booking-status-updated', payload);
@@ -947,7 +975,7 @@ export async function submitBookingReview(req, res) {
     }
 
     // Must be completed
-    if (booking.status !== 'Completed') {
+    if (booking.status !== 'Completed' && booking.status !== 'completed') {
       return res.status(400).json({ message: 'Ratings can only be submitted for completed bookings.' });
     }
 
@@ -1034,7 +1062,7 @@ export async function cancelBooking(req, res) {
       return res.status(403).json({ message: 'Unauthorized to cancel this booking.' });
     }
 
-    if (booking.status === 'Completed') {
+    if (booking.status === 'Completed' || booking.status === 'completed') {
       return res.status(400).json({ message: 'Completed bookings cannot be cancelled.' });
     }
 
@@ -1108,14 +1136,17 @@ export async function addProblemPhotosToBooking(req, res) {
     }
 
     const combined = [...(booking.problemPhotos || []), ...newPhotos].slice(0, 5);
-    booking.problemPhotos = combined;
-    await booking.save();
+    await Booking.findByIdAndUpdate(booking._id, {
+      $set: { problemPhotos: combined }
+    });
+
+    const updatedBooking = await Booking.findById(booking._id);
 
     res.json({
       success: true,
       message: 'Problem photos updated successfully.',
       photos: combined,
-      booking
+      booking: updatedBooking
     });
   } catch (err) {
     console.error('addProblemPhotosToBooking error:', err);
@@ -1177,9 +1208,12 @@ export async function addCompletionPhotosToBooking(req, res) {
     const existing = booking.completionPhotos || booking.completedPhotos || [];
     const combined = [...existing, ...newPhotos].slice(0, 5);
 
-    booking.completionPhotos = combined;
-    booking.completedPhotos = combined;
-    await booking.save();
+    await Booking.findByIdAndUpdate(booking._id, {
+      $set: {
+        completionPhotos: combined,
+        completedPhotos: combined
+      }
+    });
 
     const populated = await Booking.findById(booking._id)
       .populate('customerId', 'name email phone address profileImage')

@@ -5,21 +5,22 @@ import {
   User,
   LogOut,
   Menu,
-  X
+  X,
+  LogIn
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import WorkerApplicationModal from './WorkerApplicationModal';
 
 export default function Navbar() {
   const { user, logout, switchRole } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [isWorkerModalOpen, setIsWorkerModalOpen] = useState(false);
 
   const isServicesActive = location.pathname.startsWith('/services');
   const isWorkerRoute = location.pathname.startsWith('/worker');
-  const isCustomerRoute = location.pathname.startsWith('/customer');
+  const isProfileActive = location.pathname.startsWith('/customer') || location.pathname === '/profile';
+  const isApprovedWorker = user?.roles?.includes('worker') && user?.workerStatus === 'approved';
+  const isAdmin = user?.roles?.includes('admin');
 
   const handleSwitchToCustomer = async () => {
     setMobileMenuOpen(false);
@@ -47,133 +48,6 @@ export default function Navbar() {
     navigate('/');
   };
 
-  // Determine Link 4 details based on the 7 Cases
-  const renderLink4 = (isMobile = false) => {
-    const style = isMobile
-      ? { padding: '8px 0', fontSize: '16px', background: 'none', border: 'none', textAlign: 'left', color: 'rgba(255,255,255,0.85)', cursor: 'pointer', fontFamily: 'inherit' }
-      : { background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', fontSize: '15px' };
-
-    // Case 7: Logged-out visitor
-    if (!user) {
-      return (
-        <NavLink
-          to="/login"
-          className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-          onClick={() => isMobile && setMobileMenuOpen(false)}
-          style={isMobile ? { padding: '8px 0', fontSize: '16px' } : undefined}
-        >
-          Login
-        </NavLink>
-      );
-    }
-
-    // Case 6: Admin
-    if (user.roles?.includes('admin')) {
-      return (
-        <NavLink
-          to="/admin/dashboard"
-          className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-          onClick={() => isMobile && setMobileMenuOpen(false)}
-          style={isMobile ? { padding: '8px 0', fontSize: '16px' } : undefined}
-        >
-          Admin Dashboard
-        </NavLink>
-      );
-    }
-
-    // Case 2 & 3: Approved Worker
-    const isApprovedWorker = user.roles?.includes('worker') && user.workerStatus === 'approved';
-    if (isApprovedWorker) {
-      if (isWorkerRoute) {
-        // Case 3: On Worker Dashboard -> Switch to Customer Dashboard
-        return (
-          <button
-            type="button"
-            className="nav-link"
-            style={style}
-            onClick={handleSwitchToCustomer}
-          >
-            Switch to Customer Dashboard
-          </button>
-        );
-      } else {
-        // Case 2: On Customer Dashboard or other page -> Switch to Worker Dashboard
-        return (
-          <button
-            type="button"
-            className="nav-link"
-            style={style}
-            onClick={handleSwitchToWorker}
-          >
-            Switch to Worker Dashboard
-          </button>
-        );
-      }
-    }
-
-    // Case 4: Pending Worker
-    if (user.workerStatus === 'pending') {
-      return (
-        <NavLink
-          to="/customer/dashboard"
-          className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-          onClick={() => isMobile && setMobileMenuOpen(false)}
-          style={isMobile ? { padding: '8px 0', fontSize: '16px' } : undefined}
-        >
-          Application Status
-        </NavLink>
-      );
-    }
-
-    // Case 1 (Normal Customer) & Case 5 (Rejected Worker)
-    return (
-      <button
-        type="button"
-        className="nav-link"
-        style={style}
-        onClick={() => {
-          if (isMobile) setMobileMenuOpen(false);
-          setIsWorkerModalOpen(true);
-        }}
-      >
-        Join as a Worker
-      </button>
-    );
-  };
-
-  // Determine Link 5 details based on whether user is logged in
-  const renderLink5 = (isMobile = false) => {
-    const style = isMobile
-      ? { padding: '8px 0', fontSize: '16px', background: 'none', border: 'none', textAlign: 'left', color: 'rgba(255,255,255,0.85)', cursor: 'pointer', fontFamily: 'inherit' }
-      : { background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', fontSize: '15px' };
-
-    if (!user) {
-      // Case 7: Register
-      return (
-        <NavLink
-          to="/register"
-          className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-          onClick={() => isMobile && setMobileMenuOpen(false)}
-          style={isMobile ? { padding: '8px 0', fontSize: '16px' } : undefined}
-        >
-          Register
-        </NavLink>
-      );
-    }
-
-    // Cases 1-6: Logout
-    return (
-      <button
-        type="button"
-        className="nav-link"
-        style={style}
-        onClick={handleLogout}
-      >
-        Logout
-      </button>
-    );
-  };
-
   return (
     <header className="site-header">
       <div className="container navbar">
@@ -185,7 +59,7 @@ export default function Navbar() {
           <span>HomeTech Solutions</span>
         </Link>
 
-        {/* Desktop Navigation Links: EXACTLY 5 ITEMS */}
+        {/* Desktop Navigation Links */}
         <nav className="nav-links">
           {/* 1. Home */}
           <NavLink
@@ -212,18 +86,97 @@ export default function Navbar() {
             Contact Us
           </NavLink>
 
-          {/* 4. Dynamic Link (Case 1-7) */}
-          {renderLink4(false)}
+          {/* State-specific Navigation Options */}
+          {!user ? (
+            /* Logged-out Visitor: Login Button */
+            <Link
+              to="/login"
+              className="btn btn-yellow btn-small"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontWeight: 700,
+                padding: '6px 18px',
+                color: 'var(--primary-navy)',
+                textDecoration: 'none'
+              }}
+            >
+              <LogIn size={15} /> Login
+            </Link>
+          ) : (
+            /* Authenticated User Options */
+            <>
+              {/* Approved Worker: Dashboard Switcher */}
+              {isApprovedWorker && (
+                isWorkerRoute ? (
+                  <button
+                    type="button"
+                    className="nav-link"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', fontSize: '15px' }}
+                    onClick={handleSwitchToCustomer}
+                  >
+                    Switch to Customer Dashboard
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="nav-link"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', fontSize: '15px' }}
+                    onClick={handleSwitchToWorker}
+                  >
+                    Switch to Worker Dashboard
+                  </button>
+                )
+              )}
 
-          {/* 5. Dynamic Link (Logout or Register) */}
-          {renderLink5(false)}
+              {/* Admin: Admin Dashboard Link */}
+              {isAdmin && (
+                <NavLink
+                  to="/admin/dashboard"
+                  className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+                >
+                  Admin Dashboard
+                </NavLink>
+              )}
+
+              {/* Profile Option */}
+              <NavLink
+                to="/customer/dashboard"
+                className={`nav-link ${isProfileActive ? 'active' : ''}`}
+              >
+                Profile
+              </NavLink>
+
+              {/* Logout Option immediately beside Profile */}
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="btn btn-outline btn-small"
+                style={{
+                  color: 'var(--white)',
+                  borderColor: 'rgba(255,255,255,0.35)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '6px 12px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+                title="Logout"
+              >
+                <LogOut size={14} /> Logout
+              </button>
+            </>
+          )}
         </nav>
 
         {/* Right Navigation Actions */}
         <div className="nav-actions">
           {user && (
             <Link
-              to={isWorkerRoute ? '/worker/dashboard' : '/customer/dashboard'}
+              to="/customer/dashboard"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -235,7 +188,7 @@ export default function Navbar() {
                 textDecoration: 'none',
                 transition: 'background 0.2s ease'
               }}
-              title="Dashboard Profile"
+              title="View Customer Profile"
             >
               <div
                 style={{
@@ -254,7 +207,7 @@ export default function Navbar() {
                 {user.name ? user.name.charAt(0).toUpperCase() : <User size={14} />}
               </div>
               <span style={{ fontSize: '13px', fontWeight: 600 }}>
-                {user.name ? user.name.split(' ')[0] : 'User'}
+                {user.name ? user.name.split(' ')[0] : 'Profile'}
               </span>
             </Link>
           )}
@@ -280,6 +233,7 @@ export default function Navbar() {
       {/* Responsive Mobile Drawer */}
       {mobileMenuOpen && (
         <div
+          className="mobile-drawer"
           style={{
             backgroundColor: 'var(--primary-navy)',
             borderTop: '1px solid rgba(255,255,255,0.1)',
@@ -315,16 +269,108 @@ export default function Navbar() {
             Contact Us
           </NavLink>
 
-          {renderLink4(true)}
-          {renderLink5(true)}
+          {!user ? (
+            /* Logged-out Mobile: Prominent Login Button */
+            <Link
+              to="/login"
+              className="btn btn-yellow btn-small"
+              onClick={() => setMobileMenuOpen(false)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                padding: '10px 0',
+                marginTop: '8px',
+                fontWeight: 700
+              }}
+            >
+              <LogIn size={16} /> Login
+            </Link>
+          ) : (
+            /* Logged-in Mobile: Dynamic Options + Profile + Logout */
+            <>
+              {isApprovedWorker && (
+                isWorkerRoute ? (
+                  <button
+                    type="button"
+                    className="nav-link"
+                    style={{
+                      padding: '8px 0',
+                      fontSize: '16px',
+                      background: 'none',
+                      border: 'none',
+                      textAlign: 'left',
+                      color: 'rgba(255,255,255,0.85)',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit'
+                    }}
+                    onClick={handleSwitchToCustomer}
+                  >
+                    Switch to Customer Dashboard
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="nav-link"
+                    style={{
+                      padding: '8px 0',
+                      fontSize: '16px',
+                      background: 'none',
+                      border: 'none',
+                      textAlign: 'left',
+                      color: 'rgba(255,255,255,0.85)',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit'
+                    }}
+                    onClick={handleSwitchToWorker}
+                  >
+                    Switch to Worker Dashboard
+                  </button>
+                )
+              )}
+
+              {isAdmin && (
+                <NavLink
+                  to="/admin/dashboard"
+                  className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+                  onClick={() => setMobileMenuOpen(false)}
+                  style={{ padding: '8px 0', fontSize: '16px' }}
+                >
+                  Admin Dashboard
+                </NavLink>
+              )}
+
+              <NavLink
+                to="/customer/dashboard"
+                className={`nav-link ${isProfileActive ? 'active' : ''}`}
+                onClick={() => setMobileMenuOpen(false)}
+                style={{ padding: '8px 0', fontSize: '16px' }}
+              >
+                Profile
+              </NavLink>
+
+              <button
+                type="button"
+                className="btn btn-outline btn-small"
+                onClick={handleLogout}
+                style={{
+                  color: 'var(--white)',
+                  borderColor: 'rgba(255,255,255,0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  marginTop: '8px',
+                  padding: '9px 0'
+                }}
+              >
+                <LogOut size={16} /> Logout
+              </button>
+            </>
+          )}
         </div>
       )}
-
-      {/* Worker Application Modal for Join as a Worker */}
-      <WorkerApplicationModal
-        isOpen={isWorkerModalOpen}
-        onClose={() => setIsWorkerModalOpen(false)}
-      />
     </header>
   );
 }

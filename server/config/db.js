@@ -12,6 +12,19 @@ export default async function connectDB() {
   try {
     await mongoose.connect(uri);
     console.log(`MongoDB connected: ${uri}`);
+
+    // Safely drop legacy unique index userId_1 from workerapplications to allow additional applications
+    try {
+      const coll = mongoose.connection.db.collection('workerapplications');
+      const idxs = await coll.indexes();
+      const hasUniqueUserId = idxs.some(i => i.name === 'userId_1' && i.unique);
+      if (hasUniqueUserId) {
+        await coll.dropIndex('userId_1');
+        console.log('Dropped legacy unique index userId_1 from workerapplications');
+      }
+    } catch (idxErr) {
+      // ignore if collection or index doesn't exist
+    }
   } catch (err) {
     console.error(`MongoDB connection error to ${uri}:`, err.message);
     throw err;

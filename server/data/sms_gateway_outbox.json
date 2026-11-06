@@ -1,0 +1,128 @@
+[
+  {
+    "phone": "+917032666989",
+    "cleanPhone": "7032666989",
+    "message": "Your HomeTech verification code is 875100. Valid for 5 minutes. Do not share this OTP with anyone.",
+    "otp": "875100",
+    "dispatchedAt": "2026-11-06T13:00:32.356Z",
+    "provider": "simulated-gateway",
+    "status": "DELIVERED"
+  },
+  {
+    "phone": "+917032666989",
+    "cleanPhone": "7032666989",
+    "message": "Your HomeTech verification code is 470733. Valid for 5 minutes. Do not share this OTP with anyone.",
+    "otp": "470733",
+    "dispatchedAt": "2026-11-06T12:59:22.401Z",
+    "provider": "simulated-gateway",
+    "status": "DELIVERED"
+  },
+  {
+    "phone": "+917032666989",
+    "cleanPhone": "7032666989",
+    "message": "Your HomeTech verification code is 588274. Valid for 5 minutes. Do not share this OTP with anyone.",
+    "otp": "588274",
+    "dispatchedAt": "2026-11-06T12:58:17.254Z",
+    "provider": "simulated-gateway",
+    "status": "DELIVERED"
+  },
+  {
+    "phone": "+919822488521",
+    "cleanPhone": "9822488521",
+    "message": "Your HomeTech verification code is 577729. Valid for 5 minutes. Do not share this OTP with anyone.",
+    "otp": "577729",
+    "dispatchedAt": "2026-11-06T12:51:28.644Z",
+    "provider": "simulated-gateway",
+    "status": "DELIVERED"
+  },
+  {
+    "phone": "+919811485139",
+    "cleanPhone": "9811485139",
+    "message": "Your HomeTech verification code is 628807. Valid for 5 minutes. Do not share this OTP with anyone.",
+    "otp": "628807",
+    "dispatchedAt": "2026-11-06T12:51:27.392Z",
+    "provider": "simulated-gateway",
+    "status": "DELIVERED"
+  },
+  {
+    "phone": "+919822931498",
+    "cleanPhone": "9822931498",
+    "message": "Your HomeTech verification code is 547059. Valid for 5 minutes. Do not share this OTP with anyone.",
+    "otp": "547059",
+    "dispatchedAt": "2026-11-06T12:42:11.585Z",
+    "provider": "simulated-gateway",
+    "status": "DELIVERED"
+  },
+  {
+    "phone": "+919811928374",
+    "cleanPhone": "9811928374",
+    "message": "Your HomeTech verification code is 703540. Valid for 5 minutes. Do not share this OTP with anyone.",
+    "otp": "703540",
+    "dispatchedAt": "2026-11-06T12:42:10.362Z",
+    "provider": "simulated-gateway",
+    "status": "DELIVERED"
+  },
+  {
+    "phone": "+919844898302",
+    "cleanPhone": "9844898302",
+    "message": "Your HomeTech verification code is 304351. Valid for 5 minutes. Do not share this OTP with anyone.",
+    "otp": "304351",
+    "dispatchedAt": "2026-11-06T12:41:40.813Z",
+    "provider": "simulated-gateway",
+    "status": "DELIVERED"
+  },
+  {
+    "phone": "+919822867279",
+    "cleanPhone": "9822867279",
+    "message": "Your HomeTech verification code is 129092. Valid for 5 minutes. Do not share this OTP with anyone.",
+    "otp": "129092",
+    "dispatchedAt": "2026-11-06T12:41:07.385Z",
+    "provider": "simulated-gateway",
+    "status": "DELIVERED"
+  },
+  {
+    "phone": "+919811863860",
+    "cleanPhone": "9811863860",
+    "message": "Your HomeTech verification code is 790956. Valid for 5 minutes. Do not share this OTP with anyone.",
+    "otp": "790956",
+    "dispatchedAt": "2026-11-06T12:41:06.145Z",
+    "provider": "simulated-gateway",
+    "status": "DELIVERED"
+  },
+  {
+    "phone": "+919822797759",
+    "cleanPhone": "9822797759",
+    "message": "Your HomeTech verification code is 177332. Valid for 5 minutes. Do not share this OTP with anyone.",
+    "otp": "177332",
+    "dispatchedAt": "2026-11-06T12:39:57.867Z",
+    "provider": "simulated-gateway",
+    "status": "DELIVERED"
+  },
+  {
+    "phone": "+919811794212",
+    "cleanPhone": "9811794212",
+    "message": "Your HomeTech verification code is 631659. Valid for 5 minutes. Do not share this OTP with anyone.",
+    "otp": "631659",
+    "dispatchedAt": "2026-11-06T12:39:56.625Z",
+    "provider": "simulated-gateway",
+    "status": "DELIVERED"
+  },
+  {
+    "phone": "+919822750802",
+    "cleanPhone": "9822750802",
+    "message": "Your HomeTech verification code is 903277. Valid for 5 minutes. Do not share this OTP with anyone.",
+    "otp": "903277",
+    "dispatchedAt": "2026-11-06T12:39:10.958Z",
+    "provider": "simulated-gateway",
+    "status": "DELIVERED"
+  },
+  {
+    "phone": "+919811747337",
+    "cleanPhone": "9811747337",
+    "message": "Your HomeTech verification code is 819768. Valid for 5 minutes. Do not share this OTP with anyone.",
+    "otp": "819768",
+    "dispatchedAt": "2026-11-06T12:39:09.706Z",
+    "provider": "simulated-gateway",
+    "status": "DELIVERED"
+  }
+]

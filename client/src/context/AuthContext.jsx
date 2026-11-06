@@ -6,8 +6,14 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     try {
+      const token = localStorage.getItem('hometech_token');
       const stored = localStorage.getItem('hometech_user');
-      return stored ? JSON.parse(stored) : null;
+      if (!token || !stored) {
+        localStorage.removeItem('hometech_token');
+        localStorage.removeItem('hometech_user');
+        return null;
+      }
+      return JSON.parse(stored);
     } catch {
       return null;
     }
@@ -46,6 +52,8 @@ export function AuthProvider({ children }) {
     async function checkAuth() {
       const token = localStorage.getItem('hometech_token');
       if (!token) {
+        localStorage.removeItem('hometech_user');
+        setUser(null);
         setLoadingUser(false);
         return;
       }

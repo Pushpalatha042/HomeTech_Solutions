@@ -9,7 +9,7 @@ const complaintSchema = new mongoose.Schema({
   bookingId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Booking',
-    required: true
+    required: false
   },
   submittedBy: {
     type: mongoose.Schema.Types.ObjectId,
@@ -19,7 +19,7 @@ const complaintSchema = new mongoose.Schema({
   customerId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    required: false
   },
   workerId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -61,5 +61,6 @@ const complaintSchema = new mongoose.Schema({
 
 complaintSchema.index({ bookingId: 1, submittedBy: 1 });
 complaintSchema.index({ complaintType: 1, status: 1 });
+complaintSchema.index({ submittedBy: 1, createdAt: -1 });
 
 export default mongoose.model('Complaint', complaintSchema);

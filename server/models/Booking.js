@@ -15,7 +15,17 @@ const bookingSchema = new mongoose.Schema({
   totalAmount: { type: Number, required: true },
   status: {
     type: String,
-    enum: ['Pending', 'Confirmed', 'Assigned', 'Accepted', 'Awaiting Arrival Verification', 'In Progress', 'Completed', 'Cancelled', 'Rejected'],
+    enum: [
+      'Pending', 'pending',
+      'Confirmed', 'confirmed',
+      'Assigned', 'assigned',
+      'Accepted', 'accepted',
+      'Awaiting Arrival Verification', 'awaiting-arrival-verification',
+      'In Progress', 'in-progress', 'in_progress',
+      'Completed', 'completed',
+      'Cancelled', 'cancelled',
+      'Rejected', 'rejected'
+    ],
     default: 'Pending'
   },
   arrivalOtp: {

@@ -4,6 +4,21 @@ import User from '../models/User.js';
 
 export function initializeTrackingSocket(io) {
   io.on('connection', (socket) => {
+    // Join customer-specific notifications room
+    socket.on('join-customer-room', ({ customerId }) => {
+      if (!customerId) return;
+      socket.join(`customer:${customerId}`);
+      socket.join(`customer_${customerId}`);
+      console.log(`[Socket] Customer joined room: customer:${customerId}`);
+    });
+
+    socket.on('join-customer', (customerId) => {
+      if (!customerId) return;
+      socket.join(`customer:${customerId}`);
+      socket.join(`customer_${customerId}`);
+      console.log(`[Socket] Customer joined room: customer:${customerId}`);
+    });
+
     // Join worker-specific notifications room (Requirement 7)
     socket.on('join-worker-room', ({ workerId }) => {
       if (!workerId) return;
@@ -111,8 +126,8 @@ export function initializeTrackingSocket(io) {
         const booking = await Booking.findOne(query);
         if (!booking) return;
 
-        // Verify status is Accepted or In Progress
-        if (!['Accepted', 'In Progress'].includes(booking.status)) return;
+        // Verify status is Accepted or in-progress
+        if (!['Accepted', 'accepted', 'In Progress', 'in-progress', 'in_progress'].includes(booking.status)) return;
 
         const resolvedWorkerId = workerId || booking.workerId;
         const now = new Date();
@@ -135,15 +150,18 @@ export function initializeTrackingSocket(io) {
         );
 
         // 2. Also cache directly on Booking model for instantaneous retrieval
-        booking.workerLocation = {
-          latitude: numLat,
-          longitude: numLng,
-          accuracy: loc.accuracy,
-          heading: loc.heading,
-          speed: loc.speed,
-          lastUpdated: now
-        };
-        await booking.save();
+        await Booking.findByIdAndUpdate(booking._id, {
+          $set: {
+            workerLocation: {
+              latitude: numLat,
+              longitude: numLng,
+              accuracy: loc.accuracy,
+              heading: loc.heading,
+              speed: loc.speed,
+              lastUpdated: now
+            }
+          }
+        });
         console.log('[GPS] Coordinates saved to MongoDB');
 
         const updatePayload = {

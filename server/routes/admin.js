@@ -12,6 +12,10 @@ import {
   getAdminComplaintById,
   updateComplaintStatus
 } from '../controllers/complaintController.js';
+import {
+  getAllAdditionalCategoryApplications,
+  reviewAdditionalCategoryApplication
+} from '../controllers/workerController.js';
 import { verifyToken, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -23,6 +27,10 @@ router.get('/users', getAdminUsers);
 router.put('/users/:id/status', toggleUserStatus);
 router.get('/workers', getAdminWorkers);
 router.get('/reports', getAdminReports);
+
+// Admin Additional Category Applications (/api/admin/worker-applications/additional)
+router.get('/worker-applications/additional', getAllAdditionalCategoryApplications);
+router.put('/worker-applications/:id/review-additional', reviewAdditionalCategoryApplication);
 
 // Admin Work Distribution Diagnostics (/api/admin/diagnostics/work-distribution)
 router.get('/diagnostics/work-distribution', getWorkDistributionDiagnostics);

@@ -4,6 +4,7 @@ import {
   submitCustomerComplaint,
   submitWorkerComplaint,
   getMyComplaints,
+  getWorkerComplaints,
   getBookingComplaints,
   getAdminComplaints,
   getAdminComplaintById,
@@ -21,6 +22,7 @@ router.post('/worker', submitWorkerComplaint);
 router.post('/', submitComplaint);
 
 // User complaints retrieval
+router.get('/worker/my', getWorkerComplaints);
 router.get('/my', getMyComplaints);
 router.get('/booking/:bookingId', getBookingComplaints);
 
