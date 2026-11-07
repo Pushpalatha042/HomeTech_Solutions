@@ -184,21 +184,21 @@ export default function HomePage() {
             <div style={{ display: 'flex', gap: '24px', marginTop: '36px' }}>
               <div>
                 <strong style={{ fontSize: '24px', fontWeight: 800, color: 'var(--accent-white)' }}>
-                  0
+                  10 +
                 </strong>
-                <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>Completed Jobs</p>
+                <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>Available services</p>
               </div>
               <div style={{ width: '1px', background: 'rgba(255,255,255,0.15)' }} />
               <div>
                 <strong style={{ fontSize: '24px', fontWeight: 800, color: 'var(--accent-white)' }}>
-                  0 / 5
+                  4.5 / 5
                 </strong>
                 <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>Customer Rating</p>
               </div>
               <div style={{ width: '1px', background: 'rgba(255,255,255,0.15)' }} />
               <div>
                 <strong style={{ fontSize: '24px', fontWeight: 800, color: 'var(--accent-white)' }}>
-                  100%
+                  100 %
                 </strong>
                 <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>Verified Pros</p>
               </div>
